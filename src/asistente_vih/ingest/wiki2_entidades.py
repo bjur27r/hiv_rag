@@ -84,10 +84,20 @@ def _embeber(client: OpenAI, textos: list[str]) -> np.ndarray:
 # ------------------------------------------------------------ paso 1: fichas
 
 def fichas_por_mencion(docs: list[dict]) -> list[dict]:
+    """Una ficha por (pasaje, entidad). Ademas, el TITULO del pasaje se registra
+    como mencion propia (alias del sujeto del articulo): un articulo de
+    enciclopedia nombra a su sujeto en el titulo, y los demas pasajes suelen
+    referirse a el por esa forma ('Charles Band') aunque el texto use la forma
+    legal ('Charles Robert Band'). Se une al sujeto en `unir_titulos`."""
     fichas = []
     for d in docs:
         titulo = d["chunk_id"]
-        for forma in d["entidades"]:
+        base = re.sub(r"\(.*?\)", " ", titulo).strip()
+        entidades = list(d["entidades"])
+        if _plegar(base) not in {_plegar(e) for e in entidades} and \
+                _plegar(titulo) not in {_plegar(e) for e in entidades}:
+            entidades.append(base)                 # mencion sintetica = titulo
+        for forma in entidades:
             pleg = _plegar(forma)
             frases = [a["descripcion_relacion"] for a in d["aserciones"]
                       if pleg in _plegar(a["descripcion_relacion"]) or
@@ -108,16 +118,70 @@ def _texto_ficha(f: dict) -> str:
     return f"{f['forma']} — {f['desc']}" if f["desc"] else f["forma"]
 
 
+def unir_titulos(fichas: list[dict], uf: "_UF") -> int:
+    """Une la mencion-titulo de cada pasaje con la mencion del SUJETO del
+    pasaje: la de mayor solape de tokens significativos con el titulo (>=1),
+    desempatando por la que es sujeto de mas aserciones (longitud de desc)."""
+    por_pasaje: dict[str, list[int]] = defaultdict(list)
+    for i, f in enumerate(fichas):
+        por_pasaje[f["pasaje"]].append(i)
+    uniones = 0
+    for pasaje, idx in por_pasaje.items():
+        tit = [i for i in idx if fichas[i]["es_titulo"]]
+        if not tit:
+            continue
+        t = tit[0]; toks_t = _tokens_sig(fichas[t]["forma"])
+        mejor, mejor_key = None, (0, 0)
+        for i in idx:
+            if i == t or fichas[i]["es_titulo"]:
+                continue
+            sol = len(toks_t & _tokens_sig(fichas[i]["forma"]))
+            key = (sol, len(fichas[i]["desc"]))
+            if sol >= 1 and key > mejor_key and _fechas_compatibles(fichas[t], fichas[i]):
+                mejor, mejor_key = i, key
+        if mejor is not None:
+            uf.union(t, mejor); uniones += 1
+    return uniones
+
+
 # ------------------------------------------------------------ paso 2-3: grupos
 
-def _compatibles(a: dict, b: dict, cos_nombre: float) -> bool:
+_ORDINAL = re.compile(r"\b(\d+)(?:st|nd|rd|th)\b|\b([ivx]+)\b(?=[ ,.)]|$)")
+
+
+def _ordinales(nombre: str) -> set[str]:
+    """Numerales de titulos nobiliarios/regnales ('4th', 'II'): si difieren,
+    son personas distintas (padre/hijo, sucesores)."""
+    return {a or b for a, b in _ORDINAL.findall(nombre.lower())}
+
+
+def _nombre_base(forma: str) -> str:
+    return _plegar(re.sub(r"\(.*?\)", " ", forma))
+
+
+def _fechas_compatibles(a: dict, b: dict) -> bool:
     if a["nac"] and b["nac"] and a["nac"].isdisjoint(b["nac"]):
         return False
     if a["mue"] and b["mue"] and a["mue"].isdisjoint(b["mue"]):
         return False
+    oa, ob = _ordinales(a["forma"]), _ordinales(b["forma"])
+    return not (oa and ob and oa != ob)
+
+
+def _clasificar_par(a: dict, b: dict, cos_ficha: float, cos_nombre: float) -> str | None:
+    """'auto' (fusion directa), 'llm' (adjudicar) o None (descartar).
+    Canal principal = NOMBRE; la ficha aporta evidencia de contexto."""
+    if not _fechas_compatibles(a, b):
+        return None
+    if _nombre_base(a["forma"]) == _nombre_base(b["forma"]):
+        return "auto"                                   # nombre identico
+    if cos_nombre >= 0.90 and cos_ficha >= 0.70:
+        return "auto"                                   # casi identico + contexto afin
     if cos_nombre >= UMBRAL_NOMBRE:
-        return True
-    return bool(_tokens_sig(a["forma"]) & _tokens_sig(b["forma"]))
+        return "llm"                                    # variante de nombre
+    if cos_ficha >= UMBRAL_CAND and len(_tokens_sig(a["forma"]) & _tokens_sig(b["forma"])) >= 1:
+        return "llm"                                    # contexto afin + token comun
+    return None
 
 
 class _UF:
@@ -156,7 +220,11 @@ def _adjudicar(client: OpenAI, con: sqlite3.Connection,
                 messages=[{"role": "user", "content":
                            "For each pair, decide whether A and B refer to the SAME real-world "
                            "entity (same person/work/place), judging by names, dates, roles and "
-                           "context. Different people with similar names are NOT the same. "
+                           "context. Be strict: relatives, successors or namesakes (father/son, "
+                           "4th vs 5th Baron, Agnes vs Albert of the same house), remakes of a "
+                           "film, or different people sharing a surname are NOT the same. "
+                           "A short form and a full form of one name (\"H. P. Lovecraft\" / "
+                           "\"Howard Phillips Lovecraft\") ARE the same. "
                            'Reply JSON: {"same": {"<n>": true/false, ...}}\n\n' + lineas}])
             res = json.loads(r.choices[0].message.content).get("same", {})
         except Exception:
@@ -187,28 +255,32 @@ def construir(split: str) -> None:
         N = _embeber(client, [f["forma"] for f in fichas])
         np.savez_compressed(ruta_f, ids=np.array([f["clave"] for f in fichas]), F=F, N=N)
 
-    # candidatos: vecinos por coseno de ficha, filtrados por compatibilidad
-    uf = _UF(len(fichas)); ambiguos = []
+    # candidatos por DOS canales: vecinos por nombre (principal) y por ficha
+    uf = _UF(len(fichas)); ambiguos = set()
     auto = 0
     for i0 in range(0, len(fichas), 2000):
-        bloque = F[i0:i0 + 2000] @ F.T
-        for bi, fila in enumerate(bloque):
+        bloque_f = F[i0:i0 + 2000] @ F.T
+        bloque_n = N[i0:i0 + 2000] @ N.T
+        for bi in range(bloque_f.shape[0]):
             i = i0 + bi
-            cand = np.argpartition(-fila, VECINOS + 1)[:VECINOS + 1]
+            fila_f, fila_n = bloque_f[bi], bloque_n[bi]
+            cand = set(np.argpartition(-fila_f, VECINOS + 1)[:VECINOS + 1].tolist())
+            cand |= set(np.argpartition(-fila_n, VECINOS + 1)[:VECINOS + 1].tolist())
             for j in cand:
-                j = int(j)
-                if j <= i or fila[j] < UMBRAL_CAND:
-                    continue
-                if fichas[i]["pasaje"] == fichas[j]["pasaje"]:
+                if j <= i or fichas[i]["pasaje"] == fichas[j]["pasaje"]:
                     continue                        # misma pagina: otra entidad
-                cn = float(N[i] @ N[j])
-                if not _compatibles(fichas[i], fichas[j], cn):
+                cf, cn = float(fila_f[j]), float(fila_n[j])
+                if cn < UMBRAL_NOMBRE and cf < UMBRAL_CAND:
                     continue
-                if fila[j] >= UMBRAL_AUTO:
+                veredicto = _clasificar_par(fichas[i], fichas[j], cf, cn)
+                if veredicto == "auto":
                     uf.union(i, j); auto += 1
-                else:
-                    ambiguos.append((i, j))
-    print(f"  fusiones automaticas: {auto} | pares ambiguos para el LLM: {len(ambiguos)}")
+                elif veredicto == "llm":
+                    ambiguos.add((i, j))
+    ambiguos = sorted(ambiguos)
+    n_tit = unir_titulos(fichas, uf)
+    print(f"  fusiones automaticas: {auto} | titulo->sujeto: {n_tit} | "
+          f"pares ambiguos para el LLM: {len(ambiguos)}")
 
     WIKI2_DIR.mkdir(exist_ok=True)
     con = sqlite3.connect(WIKI2_DIR / "entidades_cache.sqlite")

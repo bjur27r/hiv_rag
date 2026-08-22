@@ -29,6 +29,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 
 import networkx as nx
 import numpy as np
@@ -85,33 +86,54 @@ def _sinonimias(ids: list[str], mat: np.ndarray) -> list[tuple[str, str]]:
     return pares
 
 
-def construir(split: str) -> None:
+def construir(split: str, canonico: bool = False) -> None:
+    """canonico=True: los nodos-entidad son las entradas del diccionario
+    (ingest.wiki2_entidades); cada mencion se resuelve a su id canonico y las
+    variantes de nombre colapsan en UN nodo. Sin aristas de sinonimia (la
+    fusion las sustituye). Salida grafo_<split>_canon.graphml."""
     docs = [json.loads(l) for l in
             open(WIKI2_DIR / f"openie_{split}.jsonl", encoding="utf-8")]
     client = OpenAI()
+    mapa: dict[str, str] = {}
+    if canonico:
+        mapa = json.loads((WIKI2_DIR / f"entidades_mapa_{split}.json").read_text(encoding="utf-8"))
+        entradas = {e["id"]: e for e in
+                    json.loads((WIKI2_DIR / f"entidades_{split}.json").read_text(encoding="utf-8"))}
+
+    def nodo_ent(titulo: str, forma: str) -> str:
+        if canonico:
+            return mapa.get(f"{titulo}||{_plegar(forma)}", f"ent:{_plegar(forma)}")
+        return f"ent:{_plegar(forma)}"
 
     # --- nodos y datos base
     g = nx.MultiDiGraph()
     plano = nx.MultiDiGraph()
-    ent_forma: dict[str, str] = {}      # id plegado -> forma superficial
+    ent_forma: dict[str, str] = {}      # id de nodo -> forma superficial
     aser_ids, aser_txt = [], []
     for d in docs:
         chunk = f"chunk:{d['chunk_id']}"
         for G in (g, plano):
             G.add_node(chunk, tipo="Chunk", titulo=d["chunk_id"])
         ents_chunk = set()
-        for e in d["entidades"]:
-            eid = f"ent:{_plegar(e)}"
-            ent_forma.setdefault(eid, e)
+        formas_chunk: dict[str, str] = {}   # id nodo -> forma en ESTE pasaje
+        entidades = list(d["entidades"])
+        if canonico:                     # el titulo tambien es mencion (alias)
+            base = re.sub(r"\(.*?\)", " ", d["chunk_id"]).strip()
+            entidades.append(base)
+        for e in entidades:
+            eid = nodo_ent(d["chunk_id"], e)
+            nombre = entradas[eid]["nombre"] if canonico and eid in entradas else e
+            ent_forma.setdefault(eid, nombre)
             ents_chunk.add(eid)
+            formas_chunk[eid] = e
         for eid in ents_chunk:
             for G in (g, plano):
                 G.add_node(eid, tipo="Entidad", forma=ent_forma[eid])
                 G.add_edge(eid, chunk, tipo_relacion="MENCIONADO_EN")
         for a in d["aserciones"]:
             aid = a["id_asercion"]
-            suj = f"ent:{_plegar(a['sujeto'])}"
-            obj = f"ent:{_plegar(a['objeto'])}"
+            suj = nodo_ent(d["chunk_id"], a["sujeto"])
+            obj = nodo_ent(d["chunk_id"], a["objeto"])
             aser_ids.append(aid)
             aser_txt.append(a["descripcion_relacion"] or
                             f"{a['sujeto']} {a['relacion_base']} {a['objeto']}")
@@ -129,7 +151,7 @@ def construir(split: str) -> None:
             # arista y el PPR no puede alcanzarla desde el hecho.
             frase = _plegar(a.get("descripcion_relacion") or "")
             for eid in ents_chunk - {suj, obj}:
-                if ent_forma[eid].lower() in frase:
+                if _plegar(formas_chunk.get(eid, ent_forma[eid])) in frase:
                     g.add_edge(aid, eid, tipo_relacion="HAS_OUTCOME")
             # plano: Entidad->Entidad si ambos son entidades (estilo HippoRAG 2)
             if suj in ent_forma and obj in ent_forma and obj != suj:
@@ -140,21 +162,25 @@ def construir(split: str) -> None:
           f"{len(aser_ids)} aserciones")
     emb_aser = _embeber(client, aser_txt, WIKI2_DIR / f"emb_aserciones_{split}.npz",
                         aser_ids)
-    ent_ids = sorted(ent_forma)
-    emb_ent = _embeber(client, [ent_forma[e] for e in ent_ids],
-                       WIKI2_DIR / f"emb_entidades_{split}.npz", ent_ids)
+    if canonico:
+        # los embeddings de entidad canonica son las fichas del diccionario
+        # (emb_fichas_<split>.npz, ya construidas); sin sinonimia vectorial.
+        sufijo = "_canon"
+    else:
+        ent_ids = sorted(ent_forma)
+        emb_ent = _embeber(client, [ent_forma[e] for e in ent_ids],
+                           WIKI2_DIR / f"emb_entidades_{split}.npz", ent_ids)
+        pares = _sinonimias(ent_ids, emb_ent)       # sinonimia vectorial
+        for u, v in pares:
+            for G in (g, plano):
+                if G.has_node(u) and G.has_node(v):
+                    G.add_edge(u, v, tipo_relacion="SINONIMO_DE")
+        print(f"sinonimia (coseno>={UMBRAL_SINONIMIA}): {len(pares)} pares")
+        sufijo = ""
 
-    # --- sinonimia vectorial (en ambos grafos)
-    pares = _sinonimias(ent_ids, emb_ent)
-    for u, v in pares:
-        for G in (g, plano):
-            if G.has_node(u) and G.has_node(v):
-                G.add_edge(u, v, tipo_relacion="SINONIMO_DE")
-    print(f"sinonimia (coseno>={UMBRAL_SINONIMIA}): {len(pares)} pares")
-
-    nx.write_graphml(g, WIKI2_DIR / f"grafo_{split}.graphml")
-    nx.write_graphml(plano, WIKI2_DIR / f"grafo_{split}_plano.graphml")
-    print(f"OK grafo_{split}.graphml: {g.number_of_nodes()} nodos / "
+    nx.write_graphml(g, WIKI2_DIR / f"grafo_{split}{sufijo}.graphml")
+    nx.write_graphml(plano, WIKI2_DIR / f"grafo_{split}{sufijo}_plano.graphml")
+    print(f"OK grafo_{split}{sufijo}.graphml: {g.number_of_nodes()} nodos / "
           f"{g.number_of_edges()} aristas | plano: {plano.number_of_nodes()} / "
           f"{plano.number_of_edges()}")
 
@@ -162,8 +188,10 @@ def construir(split: str) -> None:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--split", choices=["sondeo", "benchmark"], required=True)
+    ap.add_argument("--canonico", action="store_true",
+                    help="nodos-entidad = diccionario canonico (wiki2_entidades)")
     args = ap.parse_args()
-    construir(args.split)
+    construir(args.split, canonico=args.canonico)
 
 
 if __name__ == "__main__":

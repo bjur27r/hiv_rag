@@ -42,6 +42,48 @@ def _cargar_corpus(split: str) -> list[dict]:
 _ROL = (r"(director|screenwriter|performer|composer|producer|editor|star|"
         r"cast member|author|writer)")
 
+_PAL_PREG = {"who", "what", "which", "when", "where", "why", "how", "are", "do",
+             "does", "is", "was", "were", "did", "has", "have", "both", "film",
+             "films", "movie", "movies", "song", "songs", "album", "albums",
+             "book", "books", "novel", "novels", "the", "a", "an"}
+_CONECTORES = {"of", "the", "de", "von", "van", "and", "&", "la", "le", "du",
+               "der", "di", "y", "for", "in", "on", "to", "del", "da", "el"}
+
+
+def _plegar_alias(s: str) -> str:
+    import re
+    s = re.sub(r"\(.*?\)", " ", s.lower())
+    return " ".join(re.findall(r"[a-z0-9]+", s))
+
+
+def spans_entidad(pregunta: str) -> list[str]:
+    """Menciones candidatas: secuencias de palabras capitalizadas (con
+    conectores en minuscula entre ellas) fuera de las palabras de pregunta.
+    'Who is the mother of the director of film Polish-Russian War (Film)?'
+    -> ['Polish-Russian War (Film)']."""
+    import re
+    spans, actual = [], []
+    for tok in pregunta.strip().rstrip("?").split():
+        limpio = re.sub(r"['’]s$", "", tok.strip(",;:.\"'"))
+        base = limpio.strip("()")
+        if base and (base[0].isupper() or base[0].isdigit()) and base.lower() not in _PAL_PREG:
+            actual.append(limpio)
+        elif actual and base.lower() in _CONECTORES:
+            actual.append(limpio)
+        else:
+            if actual:
+                spans.append(actual)
+            actual = []
+    if actual:
+        spans.append(actual)
+    out = []
+    for s in spans:
+        while s and s[-1].lower() in _CONECTORES:
+            s.pop()
+        if s:
+            out.append(" ".join(s))
+    return out
+
 
 def clasificar_tipo(pregunta: str) -> str:
     """Router de intencion por reglas lexicas (96,7% en las 11.376 de
@@ -69,11 +111,23 @@ class Wiki2CatRAG:
     de cobertura profunda (sin siembra densa, damping 0.85, anclas fuertes)."""
 
     def __init__(self, split: str = "sondeo", variante: str = "lite",
-                 modo: str = "balanceado", plano: bool = False):
-        self.split, self.variante = split, variante
-        sufijo = "_plano" if plano else ""
+                 modo: str = "balanceado", plano: bool = False,
+                 canonico: bool = False, peso_enlace: float = 0.5):
+        """canonico=True: grafo sobre el diccionario de entidades
+        (grafo_<split>_canon) + linker de menciones de la pregunta + masa
+        directa en el pasaje propio de cada entidad sembrada (peso_enlace)."""
+        self.split, self.variante, self.canonico = split, variante, canonico
+        self.peso_enlace = peso_enlace
+        sufijo = ("_canon" if canonico else "") + ("_plano" if plano else "")
         self.g = nx.read_graphml(WIKI2_DIR / f"grafo_{split}{sufijo}.graphml")
         self.client = OpenAI()
+        self.entradas: dict[str, dict] = {}
+        self.alias_idx: dict[str, str] = {}
+        if canonico:
+            for e in json.loads((WIKI2_DIR / f"entidades_{split}.json").read_text(encoding="utf-8")):
+                self.entradas[e["id"]] = e
+                for al in e["alias"] + [e["nombre"]]:
+                    self.alias_idx.setdefault(_plegar_alias(al), e["id"])
         if modo == "grafo":
             self.peso_pasaje, self.dense_top_n, self.damping, self.eps = 0.0, 0, 0.85, 1.0
         elif modo == "paridad":
@@ -121,8 +175,12 @@ class Wiki2CatRAG:
         self.aser_ents = [[v for _, v, dd in self.g.out_edges(self.nodos[i], data=True)
                            if dd.get("tipo_relacion") in _INVERTIR] for i in pos]
 
-        de = np.load(WIKI2_DIR / f"emb_entidades_{split}.npz", allow_pickle=False)
+        ruta_ent = (WIKI2_DIR / f"emb_fichas_{split}.npz" if self.canonico
+                    else WIKI2_DIR / f"emb_entidades_{split}.npz")
+        de = np.load(ruta_ent, allow_pickle=False)
         self.ent_ids = list(de["ids"]); self.ent_emb = de["mat"]
+        self.ent_pos = {e: i for i, e in enumerate(self.ent_ids)}
+        self.aser_idx = {a: i for i, a in enumerate(self.aser_ids)}
 
         self.freq_ent: dict[str, int] = {}
         for u, _, dd in self.g.edges(data=True):
@@ -190,7 +248,8 @@ class Wiki2CatRAG:
         sims = np.max(np.stack([self.aser_emb @ v for v in qvecs]), axis=0)
         aprobados = None
         if variante == "juez":
-            aprobados = self._filtrar_hechos(query, sims)
+            extra = self._frontera(self._enlaces_actuales, sims) if self.canonico else None
+            aprobados = self._filtrar_hechos(query, sims, extra=extra)
             if aprobados:
                 mult = sims.copy()
                 mult[aprobados] = 1.0        # el paseo prefiere lo aprobado
@@ -229,13 +288,65 @@ Facts:
 Selected: [0, 1]
 """
 
+    # ------------------------------------------------------------ linker
+
+    def _enlazar_menciones(self, query: str) -> list[str]:
+        """Primera etapa (solo canonico): menciones de la pregunta -> ids del
+        diccionario. Alias exacto (plegado, con/sin parentesis); si no, la
+        ficha mas afin por embedding del span (coseno >= 0.80)."""
+        if not self.canonico:
+            return []
+        import re
+        enlazadas, pendientes = [], []
+        spans = []
+        for span in spans_entidad(query):
+            # 'A and B' / 'A or B': si el conjunto no es alias, probar las partes
+            if _plegar_alias(span) not in self.alias_idx and re.search(r"\s(and|or|&)\s", span):
+                spans.extend(p.strip() for p in re.split(r"\s(?:and|or|&)\s", span) if p.strip())
+            else:
+                spans.append(span)
+        for span in spans:
+            eid = self.alias_idx.get(_plegar_alias(span))
+            if eid is None and "(" in span:
+                eid = self.alias_idx.get(_plegar_alias(span.split("(")[0]))
+            if eid and eid in self.idx:
+                enlazadas.append(eid)
+            else:
+                pendientes.append(span)
+        if pendientes:
+            r = self.client.embeddings.create(input=pendientes, model=MODELO_EMB)
+            for dat in r.data:
+                v = np.array(dat.embedding, dtype=np.float32)
+                v /= max(np.linalg.norm(v), 1e-9)
+                s = self.ent_emb @ v
+                j = int(np.argmax(s))
+                if s[j] >= 0.80 and self.ent_ids[j] in self.idx:
+                    enlazadas.append(self.ent_ids[j])
+        return list(dict.fromkeys(enlazadas))
+
+    def _frontera(self, enlazadas: list[str], sims: np.ndarray, por_ent: int = 15) -> list[int]:
+        """Aserciones colgadas de las entidades enlazadas (frontera de las
+        semillas, CatRAG), las mas afines a la consulta por coseno."""
+        out = []
+        for eid in enlazadas:
+            asers = [self.aser_idx[u] for u, _, d in self.g.in_edges(eid, data=True)
+                     if d.get("tipo_relacion") in _INVERTIR and u in self.aser_idx]
+            asers.sort(key=lambda j: -sims[j])
+            out.extend(asers[:por_ent])
+        return out
+
     def _filtrar_hechos(self, query: str, sims: np.ndarray,
-                        top_k: int = 40, max_sel: int = 4) -> list[int]:
+                        top_k: int = 40, max_sel: int = 4,
+                        extra: list[int] | None = None) -> list[int]:
         """Filtro tipo recognition memory (HippoRAG 2): el LLM SELECCIONA hasta
-        max_sel hechos del top-K por coseno que sirvan para responder,
-        incluyendo saltos intermedios y candidatos puente. Devuelve indices en
-        el espacio de aserciones (lista vacia = nada relevante -> fallback)."""
-        orden = np.argsort(-sims)[:top_k]
+        max_sel hechos del top-K por coseno (+ frontera `extra`) que sirvan
+        para responder, incluyendo saltos intermedios y candidatos puente.
+        Devuelve indices en el espacio de aserciones (vacio -> fallback)."""
+        orden = list(np.argsort(-sims)[:top_k])
+        if extra:
+            vistos = set(orden)
+            orden += [j for j in extra if j not in vistos][:20]
+        orden = np.array(orden)
         lineas = "\n".join(f"{i}: {self.g.nodes[self.aser_ids[j]].get('descripcion', '')[:160]}"
                            for i, j in enumerate(orden))
         r = self.client.chat.completions.create(
@@ -309,6 +420,18 @@ Selected: [0, 1]
                 nodo = self.ent_ids[int(j)]
                 if nodo in self.idx:
                     pers[nodo] = pers.get(nodo, 0.0) + self.eps
+        # d) diccionario: entidades enlazadas desde la pregunta (anclas fuertes)
+        #    y masa DIRECTA en el pasaje propio de toda entidad sembrada
+        #    (enlazada o aprobada por el filtro): el pasaje ES la entidad.
+        if self.canonico:
+            for eid in self._enlaces_actuales:
+                pers[eid] = max(pers.get(eid, 0.0), self.peso_enlace)
+            for eid, w in list(pers.items()):
+                ent = self.entradas.get(eid)
+                if ent and ent.get("pasaje_propio"):
+                    nodo = f"chunk:{ent['pasaje_propio']}"
+                    if nodo in self.idx:
+                        pers[nodo] = pers.get(nodo, 0.0) + self.peso_enlace * w
         return pers
 
     # ------------------------------------------------------------ PPR
@@ -342,6 +465,7 @@ Selected: [0, 1]
 
     def buscar(self, query: str, k: int = 20) -> list[str]:
         variante = self._variante_efectiva(query)
+        self._enlaces_actuales = self._enlazar_menciones(query)
         qvecs = self._qvecs(query, variante)
         sims, aprobados = self._sims_aserciones(query, qvecs, variante)
         pers = self._semillas(query, qvecs, sims, aprobados)

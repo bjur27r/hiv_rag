@@ -330,3 +330,39 @@ entidades (sin arista entidad→su pasaje); 13 (6%) sin hecho puente (extracció
 
 Potencial estimado si 1-3 funcionan: resolver ~la mitad de los 218 fallos →
 FC@5 de 78 hacia 85-88. Validar en sondeo antes de tocar el benchmark.
+
+## Iteración 3 — diccionario de entidades (2026-08-22)
+
+Decisión de diseño tras el análisis de errores: el 57% de los fallos eran
+"islas" (la mención del puente en el pasaje nombrado y la entidad de su propia
+biografía eran nodos distintos sin arista: "H. P. Lovecraft" vs "Howard Phillips
+Lovecraft", coseno 0,781 < 0,80). Solución estructural, como el linker SNOMED
+del caso VIH pero derivada del corpus: **memoria de entidades** construida una
+vez desde los 6.119 pasajes (nunca desde el oro del benchmark).
+
+`ingest/wiki2_entidades.py`: ficha por mención (nombre + descriptores de sus
+aserciones) → candidatos por DOS canales (coseno de nombre ≥0,80 / coseno de
+ficha ≥0,75 con token común) → fusión automática si nombre idéntico (sin
+paréntesis) y fechas/ordinales compatibles → adjudicación LLM (lotes de 8,
+caché SQLite) para la banda ambigua, con prompt estricto (parientes, sucesores,
+homónimos ≠) → entrada canónica: nombre, alias (incluido el TÍTULO del pasaje
+como alias del sujeto), descripción, pasajes, pasaje propio. Precisión revisada
+a mano en muestra; islas resueltas en sondeo: 28/188 (v. inicial, solo ficha)
+→ 154 (canal nombre) → **178/188** (título como alias).
+
+`ingest/wiki2_grafo.py --canonico`: nodos-entidad = entradas del diccionario
+(sin sinonimia vectorial). `retrieval/wiki2_catrag.py canonico=True`:
+(1) **linker** de menciones de la pregunta (spans capitalizados → alias exacto
+→ ficha por embedding ≥0,80; división por and/or); (2) entidades enlazadas
+como anclas fuertes (0,5) y **masa directa en el pasaje propio** de toda
+entidad sembrada (enlazada o aprobada por el filtro); (3) **frontera**: las
+aserciones de las entidades enlazadas entran como candidatos del filtro.
+
+| sondeo (200) | R@5 | FC@5 | comp. | compos. | infer. | bridge_c. |
+|---|---|---|---|---|---|---|
+| v2 (router+paridad+n-aria) | 93,5 | 83,5 | 98 | 86 | 86 | 64 |
+| **v3 (+diccionario+linker+frontera)** | **97,1** | **92,0** | **100** | **92** | **94** | **82** |
+
+Pendiente: diccionario del benchmark (en construcción) → grafo canónico →
+re-medición única. Git: rama `eval-wiki2` (VIH congelado en `main`, etiqueta
+`vih-congelado-2026-08-22`).

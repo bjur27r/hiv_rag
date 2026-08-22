@@ -1,0 +1,22 @@
+# --- API ---
+fastapi>=0.110
+uvicorn[standard]>=0.27
+pydantic[email]>=2.6
+python-multipart>=0.0.9
+
+# --- Auth + BD ---
+SQLAlchemy>=2.0
+psycopg2-binary>=2.9          # Postgres (produccion)
+passlib[argon2]>=1.7
+python-jose[cryptography]>=3.3
+
+# --- Motor RAG/agentico (paquete asistente_vih) ---
+langgraph>=0.2
+langsmith>=0.1.100
+openai>=1.40                  # OpenAI y Groq (API compatible)
+anthropic>=0.69              # Claude
+numpy>=1.26                   # recuperador denso
+faiss-cpu>=1.8.0              # busqueda vectorial
+networkx>=3.0                 # grafo
+scipy>=1.11                   # calculo matricial para pagerank
+requests>=2.31                # umls client

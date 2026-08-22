@@ -1,0 +1,90 @@
+{
+ "nombre": "catrag_descomposicion_sondeo",
+ "n": 200,
+ "por_tipo": {
+  "bridge_comparison": {
+   "n": 50,
+   "recall@2": 0.41,
+   "full_chain@2": 0.0,
+   "recall@5": 0.53,
+   "full_chain@5": 0.0,
+   "recall@10": 0.59,
+   "full_chain@10": 0.02,
+   "recall@20": 0.625,
+   "full_chain@20": 0.06
+  },
+  "comparison": {
+   "n": 50,
+   "recall@2": 0.84,
+   "full_chain@2": 0.7,
+   "recall@5": 0.98,
+   "full_chain@5": 0.96,
+   "recall@10": 1.0,
+   "full_chain@10": 1.0,
+   "recall@20": 1.0,
+   "full_chain@20": 1.0
+  },
+  "compositional": {
+   "n": 50,
+   "recall@2": 0.49,
+   "full_chain@2": 0.08,
+   "recall@5": 0.62,
+   "full_chain@5": 0.24,
+   "recall@10": 0.73,
+   "full_chain@10": 0.46,
+   "recall@20": 0.77,
+   "full_chain@20": 0.54
+  },
+  "inference": {
+   "n": 50,
+   "recall@2": 0.58,
+   "full_chain@2": 0.26,
+   "recall@5": 0.77,
+   "full_chain@5": 0.56,
+   "recall@10": 0.88,
+   "full_chain@10": 0.76,
+   "recall@20": 0.91,
+   "full_chain@20": 0.82
+  }
+ },
+ "recall@2": 0.58,
+ "full_chain@2": 0.26,
+ "recall@2_ic": [
+  0.54125,
+  0.61875
+ ],
+ "full_chain@2_ic": [
+  0.2,
+  0.325
+ ],
+ "recall@5": 0.725,
+ "full_chain@5": 0.44,
+ "recall@5_ic": [
+  0.6899687499999999,
+  0.76125
+ ],
+ "full_chain@5_ic": [
+  0.37,
+  0.515
+ ],
+ "recall@10": 0.8,
+ "full_chain@10": 0.56,
+ "recall@10_ic": [
+  0.76625,
+  0.8325
+ ],
+ "full_chain@10_ic": [
+  0.49,
+  0.63
+ ],
+ "recall@20": 0.82625,
+ "full_chain@20": 0.605,
+ "recall@20_ic": [
+  0.795,
+  0.8575
+ ],
+ "full_chain@20_ic": [
+  0.535,
+  0.675
+ ]
+}

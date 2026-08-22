@@ -1,0 +1,39 @@
+# Secretos — NUNCA versionar
+.env
+.env.*
+!.env.example
+*.key
+backend/.env
+
+# Artefactos generados: solo se versionan el informe y los agregados de la eval 2wiki
+artifacts/*
+!artifacts/wiki2/
+artifacts/wiki2/*
+!artifacts/wiki2/INFORME.md
+!artifacts/wiki2/agregados_*.json
+!artifacts/wiki2/analisis_fallos_ids.json
+
+# Datos crudos (9,5 GB: guias PDF, banco, 2wiki) — fuera de git
+data/
+
+# Clones vendorizados (repos git propios; reproducibles desde GitHub)
+HippoRAG/
+CatRAG/
+
+# Documentos comerciales / propuestas (no son codigo)
+*.docx
+/*.pdf
+To
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+.pytest_cache/
+
+# Bases de datos y logs locales
+*.db
+*.sqlite
+*.log

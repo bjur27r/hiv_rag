@@ -1,0 +1,90 @@
+{
+ "nombre": "catrag_lite_sondeo",
+ "n": 200,
+ "por_tipo": {
+  "bridge_comparison": {
+   "n": 50,
+   "recall@2": 0.39,
+   "full_chain@2": 0.0,
+   "recall@5": 0.52,
+   "full_chain@5": 0.0,
+   "recall@10": 0.58,
+   "full_chain@10": 0.02,
+   "recall@20": 0.61,
+   "full_chain@20": 0.06
+  },
+  "comparison": {
+   "n": 50,
+   "recall@2": 0.72,
+   "full_chain@2": 0.5,
+   "recall@5": 0.93,
+   "full_chain@5": 0.86,
+   "recall@10": 0.97,
+   "full_chain@10": 0.94,
+   "recall@20": 1.0,
+   "full_chain@20": 1.0
+  },
+  "compositional": {
+   "n": 50,
+   "recall@2": 0.48,
+   "full_chain@2": 0.12,
+   "recall@5": 0.67,
+   "full_chain@5": 0.34,
+   "recall@10": 0.76,
+   "full_chain@10": 0.52,
+   "recall@20": 0.77,
+   "full_chain@20": 0.54
+  },
+  "inference": {
+   "n": 50,
+   "recall@2": 0.57,
+   "full_chain@2": 0.26,
+   "recall@5": 0.83,
+   "full_chain@5": 0.66,
+   "recall@10": 0.91,
+   "full_chain@10": 0.82,
+   "recall@20": 0.92,
+   "full_chain@20": 0.84
+  }
+ },
+ "recall@2": 0.54,
+ "full_chain@2": 0.22,
+ "recall@2_ic": [
+  0.5,
+  0.58
+ ],
+ "full_chain@2_ic": [
+  0.165,
+  0.28
+ ],
+ "recall@5": 0.7375,
+ "full_chain@5": 0.465,
+ "recall@5_ic": [
+  0.7025,
+  0.77375
+ ],
+ "full_chain@5_ic": [
+  0.395,
+  0.535
+ ],
+ "recall@10": 0.805,
+ "full_chain@10": 0.575,
+ "recall@10_ic": [
+  0.7725,
+  0.83875
+ ],
+ "full_chain@10_ic": [
+  0.509875,
+  0.645
+ ],
+ "recall@20": 0.825,
+ "full_chain@20": 0.61,
+ "recall@20_ic": [
+  0.7925,
+  0.85625
+ ],
+ "full_chain@20_ic": [
+  0.54,
+  0.68
+ ]
+}

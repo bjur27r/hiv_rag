@@ -1,0 +1,22 @@
+# --- Fase 1: ingesta + dataset de evaluacion ---
+PyMuPDF>=1.24        # carga de PDF preservando pagina y bloques (import fitz)
+openpyxl>=3.1        # lectura del banco de preguntas .xlsx
+
+# --- Recuperacion ---
+numpy>=1.26          # busqueda densa por coseno (indice en memoria)
+# BM25 va en Python puro (sin dependencia). El analizador espanol es propio.
+
+# --- Embeddings densos (Anthropic NO ofrece embeddings) ---
+openai>=1.40         # POR DEFECTO: text-embedding-3-large. Requiere OPENAI_API_KEY
+# voyageai>=0.3      # alternativa opcional (voyage-3.5). Requiere VOYAGE_API_KEY
+
+# --- Generacion + verificacion (LLM-as-judge), API directa de Anthropic ---
+anthropic>=0.69      # Claude (opus/sonnet/haiku). Requiere ANTHROPIC_API_KEY
+
+# --- Evaluacion / observabilidad ---
+langsmith>=0.1.100   # trazas + datasets de evaluacion
+
+# --- Fases posteriores (orquestacion agentica) — instalar cuando se aborden ---
+# langgraph>=0.2          # grafo de estados + HITL con checkpoints
+# chromadb>=0.5           # vector store de produccion (alternativa al indice numpy)
+#                         # o qdrant-client / opensearch-py

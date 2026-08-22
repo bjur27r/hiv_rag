@@ -1,0 +1,60 @@
+# Asistente clinico VIH — orquestacion. Frontend y backend en CONTENEDORES SEPARADOS.
+services:
+  db:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: vih
+      POSTGRES_PASSWORD: vih
+      POSTGRES_DB: vih
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vih"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  backend:
+    build:
+      context: .
+      dockerfile: backend/Dockerfile
+    depends_on:
+      db:
+        condition: service_healthy
+    volumes:
+      - ./artifacts:/app/artifacts
+      - ./src:/app/src
+      - ./backend/app:/app/app
+    command: >
+      bash -c "uvicorn app.main:app --host 0.0.0.0 --port 8000 > /app/artifacts/backend.log 2>&1"
+    environment:
+      DATABASE_URL: postgresql+psycopg2://vih:vih@db:5432/vih
+      JWT_SECRET: ${JWT_SECRET:-cambia-esto-en-produccion}
+      CORS_ORIGINS: http://localhost:3000
+      # Claves de modelos (desde .env de la raiz):
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GROQ_API_KEY: ${GROQ_API_KEY:-}
+      EMBEDDINGS_PROVIDER: ${EMBEDDINGS_PROVIDER:-openai}
+      LLM_PROVIDER: ${LLM_PROVIDER:-anthropic}
+      UMLS_API_KEY: ${UMLS_API_KEY:-}
+      
+      # LangSmith
+      LANGSMITH_TRACING: ${LANGSMITH_TRACING:-false}
+      LANGSMITH_API_KEY: ${LANGSMITH_API_KEY:-}
+      LANGSMITH_PROJECT: ${LANGSMITH_PROJECT:-}
+    ports:
+      - "8000:8000"
+
+  # Frontend React (contenedor propio; Nginx sirve la SPA y hace proxy /api -> backend)
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    ports:
+      - "3000:80"
+
+volumes:
+  pgdata:

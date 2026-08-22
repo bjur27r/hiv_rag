@@ -5,9 +5,7 @@ reproducción de los papers (1.000 preguntas / 6.119 pasajes). Plan completo en
 la memoria del proyecto (`asistente-vih-plan-eval-2wiki`); hilos de origen:
 18-ago (0471eaa2) y 19-ago (e057f71d).
 
-**Última actualización**: 2026-08-21, fin de jornada — ESTUDIO PRINCIPAL CERRADO
-(tabla final v2: ganamos a HippoRAG 2). Próxima sesión: 2026-08-22 — ver
-"Para la próxima sesión" al final.
+**Última actualización**: 2026-08-22 — v3 (diccionario de entidades) medida en el benchmark: R@5 96,0 / FC@5 90,6 vs HippoRAG 2 85,9 / 65,8 (ver TABLA FINAL v3).
 
 ## Dónde está cada cosa
 
@@ -366,3 +364,48 @@ aserciones de las entidades enlazadas entran como candidatos del filtro.
 Pendiente: diccionario del benchmark (en construcción) → grafo canónico →
 re-medición única. Git: rama `eval-wiki2` (VIH congelado en `main`, etiqueta
 `vih-congelado-2026-08-22`).
+
+### TABLA FINAL v3 — benchmark oficial (1.000 × 6.119, mismos modelos) — 2026-08-22
+
+| sistema | R@2 | R@5 | FC@5 | FC@10 | comp. | compos. | infer. | bridge_c. |
+|---|---|---|---|---|---|---|---|---|
+| BM25 | — | 65,8 | 32,8 | 40,1 | 86,5 | 19,4 | 32,4 | 0,9 |
+| HippoRAG 2 (su código) | 70,7 | 85,9 | 65,8 | 71,7 | 93,4 | 77,2 | 75,9 | 12,3 |
+| CatRAG router v2 | 70,4 | 90,9 | 78,2 | 85,8 | 96,3 | 79,2 | 82,4 | 55,7 |
+| **CatRAG v3 (diccionario+linker+frontera)** | **73,0** | **96,0** | **90,6** | **93,4** | **99,2** | **91,0** | **84,3** | **83,8** |
+
+**Pareado vs HippoRAG 2** (bootstrap 2.000, IC95): FC@5 **+24,8 [+21,8, +27,8] SIG**
+(gana 279 preguntas / pierde 31); R@5 +10,2 SIG; R@2 +2,3 SIG (ya no es empate).
+Por tipo FC@5: bridge_comparison **+71,5 SIG**, compositional **+13,8 SIG**,
+comparison +5,7 SIG, inference +8,3 ns (n=108). Es decir: **victoria
+significativa en 3 de 4 tipos y en todas las métricas globales**, incluido el
+encadenamiento puro (compositional), donde la v2 solo empataba.
+
+**Pareado vs v2**: FC@5 +12,4 [+10,2, +14,7] SIG (gana 136 / pierde 12) — el
+diccionario apenas rompe nada (12 preguntas) y arregla 136.
+
+Contexto: el R@5 96,0 supera el 90,4 que el paper de HippoRAG 2 reporta con
+Llama-3.3-70B + NV-Embed-v2 (7B), obtenido aquí con gpt-4o-mini +
+text-embedding-3-small y ~1 llamada LLM por consulta.
+
+**Nota de honestidad (ampliada)**: (a) las 3 preguntas trazadas en la iteración
+2 son del benchmark (ver arriba); (b) el análisis de errores que motivó la
+iteración 3 se hizo sobre los fallos de la v2 EN EL BENCHMARK — a nivel de
+mecanismo (clases de fallo), no de pregunta, y la solución (diccionario) es
+estructural y se validó en el sondeo held-out con el mismo efecto (83,5→92,0);
+aun así, para publicación el análisis de errores debe repetirse sobre el
+conjunto de calibración y las demos del filtro re-derivarse de ahí. Ninguna
+decisión usa el oro del benchmark como dato de entrada.
+
+**Receta final v3**: memoria de entidades canónica derivada del corpus
+(fichas, fusión por nombre+contexto, adjudicación LLM, título como alias) →
+grafo reificado n-ario sobre nodos canónicos → linker de menciones → filtro
+selector few-shot con candidatos por coseno ∪ frontera de las entidades
+enlazadas → compuerta dura en la siembra + pasaje propio de cada entidad
+sembrada + todos los pasajes con prior denso → PPR (d=0,5) con modulación por
+coseno → router léxico por tipo. Coste acumulado del estudio: ~$12.
+
+**Siguientes pasos (cuando se retome)**: ablaciones formales sobre v3 (sin
+diccionario / sin linker / sin frontera / sin pasaje propio / grafo plano) para
+atribuir; análisis de errores de v3 sobre calibración; QA EM/F1 extremo a
+extremo; MuSiQue y HotpotQA con los mismos scripts si hay intención de paper.

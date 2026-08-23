@@ -5,7 +5,7 @@ reproducción de los papers (1.000 preguntas / 6.119 pasajes). Plan completo en
 la memoria del proyecto (`asistente-vih-plan-eval-2wiki`); hilos de origen:
 18-ago (0471eaa2) y 19-ago (e057f71d).
 
-**Última actualización**: 2026-08-22 — v3 (diccionario de entidades) medida en el benchmark: R@5 96,0 / FC@5 90,6 vs HippoRAG 2 85,9 / 65,8 (ver TABLA FINAL v3).
+**Última actualización**: 2026-08-23 — estudio de errores v3 hecho; dos planes de mejora listos (calidad-primero y coste-mínimo). Ver "Para la próxima sesión (2026-08-24)" al final.
 
 ## Dónde está cada cosa
 
@@ -255,7 +255,7 @@ resto→juez).
   porque las aserciones ya están verbalizadas.
 - Presupuesto estimado total ~$12-15 (techo $25); gastado al cierre del 21-ago: ~$10-11.
 
-## Para la próxima sesión (2026-08-22)
+## Para la sesión del 2026-08-22 (histórico — cumplido: se hizo el diccionario)
 
 Estado: estudio principal cerrado con victoria (tabla final v2). Retomar por aquí,
 en orden de valor:
@@ -440,3 +440,55 @@ SONDEO (held-out), para no contaminar el test con el diagnóstico fino.
 filtro** (modelo pequeño + selección máxima de 4), seguido del alcance del
 linker. Las heurísticas (router léxico, spans capitalizados) no son causa
 medible de fallo en este dataset, pero sí límites de generalización.
+
+## Para la próxima sesión (2026-08-24)
+
+**Estado**: v3 en benchmark R@5 96,0 / FC@5 90,6 (HippoRAG 2: 85,9 / 65,8).
+Estudio de errores v3 hecho (sección anterior): el cuello de botella es el
+JUICIO del filtro (12/15 fallos held-out: el hecho puente estaba en la lista y
+no se seleccionó), después el alcance del linker (3/15). Código en rama
+`eval-wiki2`, subido a github.com/bjur27r/hiv_rag (VIH congelado en `main`).
+
+**Decisión pendiente del usuario**: qué plan ejecutar primero.
+
+### Plan A — calidad primero (mejorar FC@5; ~$0,01/consulta, ~$10 por pasada)
+Evidencia en vivo sobre fallos held-out (2026-08-23):
+1. **Filtro "planifica y luego selecciona"** (máx. 8, modelo mejor solo aquí):
+   en "Bílá spona / A Night at Earl Carroll's" el filtro actual eligió al ACTOR
+   Earl Carroll como director y omitió a Kurt Neumann aunque estaba en la
+   lista; con plan, gpt-4o-mini seleccionó los dos puentes y gpt-4o exactamente
+   los dos. Mayor impacto esperado (bridge_comparison y compositional).
+2. **Selección final de CONJUNTO** (LLM elige 5 del top-10/20 que cubran la
+   cadena): "Joan de Beauchamp" tenía el oro en el puesto 6; la selección de
+   conjunto lo recogió. 30 oros del benchmark están en puestos 6-10.
+3. **Segundo salto dirigido**: el plan nombra el hueco ("fecha de muerte de
+   Kurt Neumann") → si su pasaje no está, se pide por nombre y se re-filtra.
+4. **Linker por LLM (NER + forma canónica + desambiguación)**: la regla de
+   mayúsculas produjo el span roto 'Magician (1958' y no enlazó "The Magician
+   (1958 film)" aunque el diccionario tenía la entrada; el NER-LLM devolvió el
+   título canónico exacto. Poco impacto en 2Wiki (+0,5-1), grande en
+   generalización (español, minúsculas, homónimos).
+Implementación: 1+3+4 en UNA llamada (NER → plan → selección), 2 en una
+segunda pequeña. Validar en sondeo (listón 92,0) → una re-medición.
+Expectativa: FC@5 94-96. Índice (más tarde): re-extracción prompt v2 (sujeto =
+forma del título + alias, roles n-arios), adjudicación por grupos, descripciones
+de ficha redactadas por LLM.
+
+### Plan B — coste mínimo estricto (misma calidad, ~0,5 llamadas/consulta)
+1. Comparison sin LLM (linker + pasaje propio + PPR; 24% de consultas a $0).
+2. Compuerta de confianza: ruta sin LLM primero; filtro solo si las entidades
+   enlazadas no tienen su pasaje en top-5 o no hay pasaje puente alcanzado.
+3. Caché de prefijo del prompt del filtro (80% fijo) y caché de resultados
+   (embeddings de pregunta, salidas del filtro) → re-mediciones a $0.
+4. Modelo más barato en el filtro con regla dura: "el más barato que mantenga
+   FC@5 ≥ 92 en sondeo" (candidatos: gpt-4.1-nano, gpt-5-nano, Gemini Flash-Lite,
+   DeepSeek-V3 con caché; precios a verificar). DeepSeek ya se usa en
+   extraccion_masiva.py; lotes nocturnos / Batch API para trabajos de índice.
+El diccionario NO se elimina: es el recuperador rápido (alias exacto, $0) y
+la capa LLM de sinonimia solo actúa sobre lo que no sabe y lo escribe de vuelta.
+
+### Lo que NO movería FC@5: router por LLM (5/94 errores = tasa base), sinonimia
+por umbral en consulta, tocar el PPR.
+
+### Pendiente de siempre: ablaciones v3, QA EM/F1 + Joint Success Rate,
+MuSiQue/HotpotQA, análisis de errores sobre calibración para el paper.

@@ -409,3 +409,34 @@ coseno → router léxico por tipo. Coste acumulado del estudio: ~$12.
 diccionario / sin linker / sin frontera / sin pasaje propio / grafo plano) para
 atribuir; análisis de errores de v3 sobre calibración; QA EM/F1 extremo a
 extremo; MuSiQue y HotpotQA con los mismos scripts si hay intención de paper.
+
+## Estudio de errores de la v3 (2026-08-23)
+
+Método: estadísticas agregadas sobre los 94 fallos FC@5 del benchmark (sin
+mirar preguntas individuales) + trazas instrumentadas sobre los 16 fallos del
+SONDEO (held-out), para no contaminar el test con el diagnóstico fino.
+
+**Benchmark (94 fallos: bridge_c. 38, compositional 37, inference 17, comparison 2)**
+- Oros perdidos: 88 de 102 son el pasaje puente (64 ausentes del top-20, 18 en
+  6-10, 6 en 11-20); solo 14 son el pasaje nombrado (12 de ellos en 6-10).
+- bridge_comparison: 31 preguntas traen 3 de 4 oros en top-5 (falta un director).
+- Router por reglas: 5 de 94 fallos mal enrutados (≈ tasa base 29/1000) → no es causa.
+- Linker: todas las preguntas tienen span detectado; ids linker↔grafo consistentes.
+- Regresiones v3 vs v2: 12 (inference 6, compositional 5); fallan ambos sistemas
+  (v3 y HippoRAG 2): 63; solo v3: 31.
+
+**Atribución por etapa (15 fallos puente del sondeo, instrumentados)**
+- **12/15: el hecho puente ESTABA en la lista de candidatos del filtro y el LLM
+  no lo seleccionó** (gpt-4o-mini, máx. 4 hechos; en bridge_comparison hacen
+  falta ≥4: dos "directed by" + dos fechas, y el filtro tiende a quedarse en
+  los hechos de película). Ejemplo: "Bílá spona was directed by Kurt Neumann"
+  presente y no elegido.
+- 3/15: el hecho puente no llegó a candidatos (linker sin enlace para "The
+  Magician (1958 Film)"; hecho formulado sin el nombre).
+- 2 filtros vacíos (fallback denso), 2 casi-aciertos de ranking (rangos 5-8).
+- La hipótesis "tope de 20 en la frontera" se descartó: fronteras de 0-10.
+
+**Conclusión**: el cuello de botella actual es el **juicio y la capacidad del
+filtro** (modelo pequeño + selección máxima de 4), seguido del alcance del
+linker. Las heurísticas (router léxico, spans capitalizados) no son causa
+medible de fallo en este dataset, pero sí límites de generalización.

@@ -583,3 +583,32 @@ encima del 4º oro rompe la cadena.
 Verificación futura: MuSiQue codifica el nº de saltos en el id de cada
 pregunta (2hop/3hop/4hop) → la curva FC-vs-saltos saldrá gratis en F2 y es el
 contraste directo de este modelo.
+
+## RESULTADO FINAL DE LA CAMPAÑA — Plan A en el benchmark (2026-08-25)
+
+| sistema | R@2 | R@5 | FC@5 | comp. | compos. | infer. | bridge_c. |
+|---|---|---|---|---|---|---|---|
+| BM25 | — | 65,8 | 32,8 | 86,5 | 19,4 | 32,4 | 0,9 |
+| HippoRAG 2 | 70,7 | 85,9 | 65,8 | 93,4 | 77,2 | 75,9 | 12,3 |
+| CatRAG v3 | 73,0 | 96,0 | 90,6 | 99,2 | 91,0 | 84,3 | 83,8 |
+| **Plan A (deepseek-chat)** | **82,2** | **98,5** | **96,9** | **99,6** | **95,6** | **90,7** | **99,1** |
+
+Pareado vs HippoRAG 2: FC@5 **+31,3 [+28,3, +34,4] SIG** (gana 322 / pierde 9);
+R@2 +11,5 SIG. Por tipo, TODOS significativos (incluido inference +14,8, que
+en v3 no lo era). Pareado vs v3: FC@5 +6,5 [+4,8, +8,2] SIG (gana 74/pierde 9).
+
+**El hallazgo conceptual: el gradiente de dificultad se INVIERTE.** Por
+estructura de salto: A 99,6 · B 94,6 · **C doble puente 99,1** — el segmento
+que era el peor de todos los sistemas (BM25 0,9; HippoRAG 12,3) es ahora el
+MEJOR del Plan A, y queda muy por encima del modelo multiplicativo
+(p_B=0,973 → C predicho 89,5 vs observado 99,1): el plan asigna recursos POR
+CADENA (huecos explícitos, tope dinámico, conjunto final), así que la doble
+cadena, lejos de compartir un presupuesto fijo, recibe el doble — la
+refutación constructiva del colapso estructural de HippoRAG.
+
+Coste de la medición: ~$1 (DeepSeek, parte en franja nocturna). Coste
+operativo: ~$0,001/consulta, ~2,2 llamadas. DECISIÓN: Plan A + deepseek-chat
+queda ADOPTADO como configuración final de la campaña (gpt-oss-20b de Groq,
+validado como alternativa a mitad de coste). Nota .tex: el documento describe
+la v3; el Plan A requerirá su propia subsección cuando se escriba (con las
+ablaciones).

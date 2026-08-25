@@ -633,3 +633,25 @@ superaditividad (0,5+3,0+1,5=5,0 < 5,5 observado): el conjunto ordena mejor
 lo que el salto ha traído. La cadena causal completa de la campaña queda:
 v3 92,0 → +plan 92,5 → +salto 95,5 → +conjunto 97,5 (sondeo), que en
 benchmark es 90,6 → 96,9.
+
+## Guía de lectura de las métricas (añadida a petición del usuario)
+
+- **R@k (exhaustividad)**: fracción de los pasajes oro presentes entre los k
+  primeros devueltos. Parcial: 1 de 2 oros en el top-5 → R@5 = 0,5.
+- **FC@k (cadena completa)**: 1 solo si TODOS los oros están en el top-k.
+  Es la métrica alineada con multisalto: al lector no le vale media cadena.
+- **FC@2**: exige los oros exactamente en las posiciones 1-2. OJO: las 235
+  bridge_comparison tienen 4 oros → FC@2 es IMPOSIBLE por definición para
+  ellas (por eso siempre marcan 0,0); el agregado global lleva ese 23,5% de
+  ceros estructurales incorporado (el 61,5 del Plan A equivale a ~80% sobre
+  las preguntas donde es alcanzable). Responde a "¿bastarían 2 pasajes de
+  contexto?"; la métrica estándar de los papers es FC@5.
+- **Escalera de contribuciones** (antes mal llamada "cadena causal"): secuencia
+  de versiones donde cada peldaño añade UNA pieza sobre lo demás fijo; la
+  subida de cada peldaño es atribuible a esa pieza (= ablaciones aditivas).
+- **EM / F1 (QA)**: coincidencia exacta / solape de palabras entre la
+  respuesta del lector y la respuesta oro. **JSR (Joint Success Rate)**:
+  cadena completa recuperada Y respuesta correcta — "resuelto con evidencia".
+- **Cifra de archivo**: la medición final con todo congelado (prompts con
+  ejemplos re-derivados de calibración, diales fijos) — el número publicable,
+  sin contacto test↔diseño.

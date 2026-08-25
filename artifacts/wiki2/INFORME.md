@@ -612,3 +612,24 @@ queda ADOPTADO como configuración final de la campaña (gpt-oss-20b de Groq,
 validado como alternativa a mitad de coste). Nota .tex: el documento describe
 la v3; el Plan A requerirá su propia subsección cuando se escriba (con las
 ablaciones).
+
+## Ablaciones del Plan A (sondeo, deepseek-chat, 2026-08-25)
+
+| configuración | FC@5 | FC@2 | C doble puente | aporte |
+|---|---|---|---|---|
+| v3 (referencia, sin Plan A) | 92,0 | 46,0 | 82,0 | — |
+| solo analista | 92,5 | 55,5 | 86,0 | +0,5 |
+| analista + conjunto (sin salto) | 94,0 | 61,0 | 86,0 | +1,5 |
+| analista + salto (sin conjunto) | 95,5 | 55,0 | 96,0 | +3,0 |
+| **Plan A completo** | **97,5** | **61,5** | **96,0** | **+5,5** |
+
+Lectura: el analista POR SÍ SOLO apenas mueve el agregado (+0,5) — su valor
+es que produce el PLAN que consumen los otros dos componentes. El **salto
+dirigido es el mayor contribuyente individual** (+3,0; en doble puente
+86→96: rescata los puentes que ni el coseno ni la frontera alcanzan, caso
+Ansiktet). El **conjunto final aporta orden temprano** (+1,5 en FC@5 y +6
+puntos de FC@2: coloca la cadena en las primeras posiciones). Ligera
+superaditividad (0,5+3,0+1,5=5,0 < 5,5 observado): el conjunto ordena mejor
+lo que el salto ha traído. La cadena causal completa de la campaña queda:
+v3 92,0 → +plan 92,5 → +salto 95,5 → +conjunto 97,5 (sondeo), que en
+benchmark es 90,6 → 96,9.

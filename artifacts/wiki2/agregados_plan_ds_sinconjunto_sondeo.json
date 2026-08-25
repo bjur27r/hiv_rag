@@ -1,0 +1,125 @@
+{
+ "nombre": "plan_ds_sinconjunto_sondeo",
+ "n": 200,
+ "por_tipo": {
+  "bridge_comparison": {
+   "n": 50,
+   "recall@2": 0.495,
+   "full_chain@2": 0.0,
+   "recall@5": 0.99,
+   "full_chain@5": 0.96,
+   "recall@10": 0.99,
+   "full_chain@10": 0.96,
+   "recall@20": 0.995,
+   "full_chain@20": 0.98
+  },
+  "comparison": {
+   "n": 50,
+   "recall@2": 0.91,
+   "full_chain@2": 0.82,
+   "recall@5": 1.0,
+   "full_chain@5": 1.0,
+   "recall@10": 1.0,
+   "full_chain@10": 1.0,
+   "recall@20": 1.0,
+   "full_chain@20": 1.0
+  },
+  "compositional": {
+   "n": 50,
+   "recall@2": 0.91,
+   "full_chain@2": 0.84,
+   "recall@5": 0.98,
+   "full_chain@5": 0.96,
+   "recall@10": 1.0,
+   "full_chain@10": 1.0,
+   "recall@20": 1.0,
+   "full_chain@20": 1.0
+  },
+  "inference": {
+   "n": 50,
+   "recall@2": 0.75,
+   "full_chain@2": 0.54,
+   "recall@5": 0.95,
+   "full_chain@5": 0.9,
+   "recall@10": 0.98,
+   "full_chain@10": 0.96,
+   "recall@20": 0.98,
+   "full_chain@20": 0.96
+  }
+ },
+ "recall@2": 0.76625,
+ "full_chain@2": 0.55,
+ "recall@2_ic": [
+  0.73,
+  0.8025
+ ],
+ "full_chain@2_ic": [
+  0.48,
+  0.62
+ ],
+ "recall@5": 0.98,
+ "full_chain@5": 0.955,
+ "recall@5_ic": [
+  0.965,
+  0.99125
+ ],
+ "full_chain@5_ic": [
+  0.925,
+  0.98
+ ],
+ "recall@10": 0.9925,
+ "full_chain@10": 0.98,
+ "recall@10_ic": [
+  0.98375,
+  0.99875
+ ],
+ "full_chain@10_ic": [
+  0.955,
+  0.995
+ ],
+ "recall@20": 0.99375,
+ "full_chain@20": 0.985,
+ "recall@20_ic": [
+  0.985,
+  1.0
+ ],
+ "full_chain@20_ic": [
+  0.965,
+  1.0
+ ],
+ "por_salto": {
+  "A sin puente": {
+   "n": 50,
+   "recall@2": 0.91,
+   "full_chain@2": 0.82,
+   "recall@5": 1.0,
+   "full_chain@5": 1.0,
+   "recall@10": 1.0,
+   "full_chain@10": 1.0,
+   "recall@20": 1.0,
+   "full_chain@20": 1.0
+  },
+  "B puente simple": {
+   "n": 100,
+   "recall@2": 0.83,
+   "full_chain@2": 0.69,
+   "recall@5": 0.965,
+   "full_chain@5": 0.93,
+   "recall@10": 0.99,
+   "full_chain@10": 0.98,
+   "recall@20": 0.99,
+   "full_chain@20": 0.98
+  },
+  "C doble puente": {
+   "n": 50,
+   "recall@2": 0.495,
+   "full_chain@2": 0.0,
+   "recall@5": 0.99,
+   "full_chain@5": 0.96,
+   "recall@10": 0.99,
+   "full_chain@10": 0.96,
+   "recall@20": 0.995,
+   "full_chain@20": 0.98
+  }
+ }
+}

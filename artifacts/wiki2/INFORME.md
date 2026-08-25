@@ -5,7 +5,7 @@ reproducción de los papers (1.000 preguntas / 6.119 pasajes). Plan completo en
 la memoria del proyecto (`asistente-vih-plan-eval-2wiki`); hilos de origen:
 18-ago (0471eaa2) y 19-ago (e057f71d).
 
-**Última actualización**: 2026-08-23 — estudio de errores v3 hecho; dos planes de mejora listos (calidad-primero y coste-mínimo). Ver "Para la próxima sesión (2026-08-24)" al final.
+**Última actualización**: 2026-08-25, cierre — Plan A ADOPTADO (benchmark R@5 98,5 / FC@5 96,9), ablaciones hechas, comparabilidad verificada al decimal con el paper de CatRAG. Ver "Para la próxima sesión (2026-08-26)".
 
 ## Dónde está cada cosa
 
@@ -687,3 +687,30 @@ nuestro) por ser implementaciones independientes de un baseline local;
 irrelevante para la comparación entre sistemas. JSR publicado (reader
 Llama-70B): HippoRAG 2 53,0 / CatRAG 55,0 en 2Wiki — referencia para cuando
 midamos nuestro QA extremo a extremo.
+
+## Para la próxima sesión (2026-08-26)
+
+**Estado**: campaña 2Wiki cerrada con el Plan A adoptado (deepseek-chat):
+benchmark R@5 98,5 / FC@5 96,9 / bridge_comparison 99,1 (gradiente invertido);
+ablaciones hechas (salto +3,0; conjunto +1,5 y +6 FC@2; analista +0,5 como
+habilitador); reproducción de HippoRAG 2 validada AL DECIMAL contra la del
+paper de CatRAG (mismos modelos) y comparación directa con CatRAG publicado:
+87,0/67,6 vs 98,5/96,9. Groq gpt-oss-20b validado como alternativa (97,0 en
+sondeo, mitad de coste); qwen3.6-27b descartado (67,5). Todo en rama
+`eval-wiki2` (github.com/bjur27r/hiv_rag), 15 commits.
+
+**Decisiones pendientes del usuario**:
+1. QA extremo a extremo (EM/F1 + JSR, ~$1, franja nocturna DeepSeek): listo
+   para lanzar; referencia publicada a batir: JSR 53,0/55,0 (HippoRAG/CatRAG,
+   reader Llama-70B — nosotros con reader propio, anotar la diferencia).
+2. MuSiQue + HotpotQA (~$20 con DeepSeek nocturno; config CONGELADA, cero
+   ajuste por dataset): esperando visto bueno de presupuesto. MuSiQue trae
+   saltos 2/3/4 etiquetados → contraste del modelo multiplicativo.
+3. Demos del analista re-derivadas desde calibración + medición congelada
+   ("cifra de archivo", ~$1) — hacer ANTES de escribir el Plan A en el .tex.
+4. Porte del Plan A a GeSIDA (offline, banco 505; JAMÁS DeepSeek en clínico).
+
+**Recordatorios técnicos**: el .tex describe la v3 (el Plan A necesitará su
+subsección con estas ablaciones); pdflatex no está instalado; la franja
+nocturna de DeepSeek es 18:30-02:30 hora española; rotación de claves
+OpenAI/Anthropic sigue recomendada; VIH congelado en `main`.

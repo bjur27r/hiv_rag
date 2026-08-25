@@ -655,3 +655,35 @@ benchmark es 90,6 → 96,9.
 - **Cifra de archivo**: la medición final con todo congelado (prompts con
   ejemplos re-derivados de calibración, diales fijos) — el número publicable,
   sin contacto test↔diseño.
+
+## Verificación de comparabilidad con los artículos (2026-08-25, a petición del usuario)
+
+**Auditoría de nuestra medición de HippoRAG 2**: 1.000 preguntas, top-20 por
+pregunta, 0 títulos fuera del corpus (mapeo doc→título correcto), 0
+duplicados, métricas recalculadas idénticas (R@2 70,7 / R@5 85,9).
+
+**Cruce con el paper de CatRAG (Findings ACL 2026, §4.4 + tablas 2 y 4)**: su
+implementación usa EXACTAMENTE nuestro backbone ("GPT-4o-mini as the backbone
+for all LLM components and text-embedding-3-small as the retriever; all
+baselines reproduced with the same extractor and retriever"). Su reproducción
+independiente de HippoRAG 2 en 2Wiki: **R@5 85,9 / FCR 66,1** — nuestra
+medición (85,9 / 65,8) coincide al decimal. El 90,4 del paper de HippoRAG 2
+corresponde a NV-Embed-v2 (embedder 7B en GPU): otra clase de hardware.
+
+**Comparación directa con CatRAG, por fin posible** (sus números publicados en
+2Wiki usan nuestro mismo backbone):
+
+| 2Wiki, todos gpt-4o-mini + te3-small | R@5 | FC@5/FCR |
+|---|---|---|
+| HippoRAG 2 (nuestro run / su paper) | 85,9 / 85,9 | 65,8 / 66,1 |
+| CatRAG (paper; código no liberado) | 87,0 | 67,6 |
+| CatRAG v3 (nuestro) | 96,0 | 90,6 |
+| **Plan A (nuestro)** | **98,5** | **96,9** |
+
+CatRAG mejora a su base en +1,1/+1,5 (la mejora "modesta" que su abstract
+admite); nuestro Plan A le saca +11,5 de R@5 y +29,3 de FC@5 en igualdad
+exacta de modelos. Nota: el BM25 difiere entre papers (52,1 suyo vs 65,8
+nuestro) por ser implementaciones independientes de un baseline local;
+irrelevante para la comparación entre sistemas. JSR publicado (reader
+Llama-70B): HippoRAG 2 53,0 / CatRAG 55,0 en 2Wiki — referencia para cuando
+midamos nuestro QA extremo a extremo.

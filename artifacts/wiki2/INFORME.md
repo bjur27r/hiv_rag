@@ -492,3 +492,33 @@ por umbral en consulta, tocar el PPR.
 
 ### Pendiente de siempre: ablaciones v3, QA EM/F1 + Joint Success Rate,
 MuSiQue/HotpotQA, análisis de errores sobre calibración para el paper.
+
+## Plan A ejecutado — matriz de modelos en sondeo (2026-08-25)
+
+Implementado `retrieval/wiki2_plan.py` (extiende la v3 sin tocarla): ANALISTA
+(NER + plan de la cadena + selección con tope dinámico, 1 llamada), SALTO
+dirigido por huecos con candidatos ESTRUCTURALES (aserciones del pasaje propio
+de la entidad enlazada — resuelve el caso "The Magician"/Ansiktet, título en
+otro idioma) y CONJUNTO final (5 pasajes que cubren el plan; se omite en
+comparison). Multi-proveedor (OpenAI / DeepSeek / Groq) con caché SQLite.
+Iteración del prompt: prohibido rellenar el plan con conocimiento paramétrico
+(el analista inventaba "Menahem Golan"); huecos como consulta de recuperación;
+procedencia [artículo] en los hechos del salto.
+
+| modelo (200 held-out) | R@5 | FC@5 | $/consulta | supera 92 |
+|---|---|---|---|---|
+| deepseek-chat (V3) | **99,0** | **97,5** | ~0,0010 | sí |
+| groq gpt-oss-20b | 98,9 | 97,0 | ~0,0005 | sí |
+| gpt-4o | 98,6 | 96,5 | ~0,012 | sí |
+| gpt-4o-mini | 98,5 | 96,0 | ~0,0008 | sí |
+| groq qwen3.6-27b | 85,6 | 67,5 | — | NO (planes vacíos) |
+| v3 (referencia) | 97,1 | 92,0 | ~0,0004 | — |
+
+Lecturas: (1) la ganancia es del DISEÑO de la tarea, no del músculo — gpt-4o
+solo +0,5 sobre su mini a 15×; (2) gpt-oss-20b (rango bajo de Groq) empata de
+facto con DeepSeek (1 pregunta de diferencia) a mitad de coste — validado como
+alternativa; en contra: límites de peticiones de la capa gratuita y fallos de
+validación JSON (mitigados con reintento); (3) qwen3.6-27b marca el suelo de
+capacidad. Decisión: benchmark con deepseek-chat (calidad máxima + API
+estable); groq oss-20b queda como alternativa validada sin gastar una mirada
+al benchmark. Medición en curso.

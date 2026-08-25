@@ -1,0 +1,90 @@
+{
+ "nombre": "plan_groq_oss20b_sondeo",
+ "n": 200,
+ "por_tipo": {
+  "bridge_comparison": {
+   "n": 50,
+   "recall@2": 0.5,
+   "full_chain@2": 0.0,
+   "recall@5": 0.975,
+   "full_chain@5": 0.92,
+   "recall@10": 0.975,
+   "full_chain@10": 0.92,
+   "recall@20": 0.98,
+   "full_chain@20": 0.94
+  },
+  "comparison": {
+   "n": 50,
+   "recall@2": 0.91,
+   "full_chain@2": 0.82,
+   "recall@5": 1.0,
+   "full_chain@5": 1.0,
+   "recall@10": 1.0,
+   "full_chain@10": 1.0,
+   "recall@20": 1.0,
+   "full_chain@20": 1.0
+  },
+  "compositional": {
+   "n": 50,
+   "recall@2": 0.93,
+   "full_chain@2": 0.86,
+   "recall@5": 0.99,
+   "full_chain@5": 0.98,
+   "recall@10": 0.99,
+   "full_chain@10": 0.98,
+   "recall@20": 0.99,
+   "full_chain@20": 0.98
+  },
+  "inference": {
+   "n": 50,
+   "recall@2": 0.86,
+   "full_chain@2": 0.72,
+   "recall@5": 0.99,
+   "full_chain@5": 0.98,
+   "recall@10": 0.99,
+   "full_chain@10": 0.98,
+   "recall@20": 0.99,
+   "full_chain@20": 0.98
+  }
+ },
+ "recall@2": 0.8,
+ "full_chain@2": 0.6,
+ "recall@2_ic": [
+  0.765,
+  0.835
+ ],
+ "full_chain@2_ic": [
+  0.53,
+  0.67
+ ],
+ "recall@5": 0.98875,
+ "full_chain@5": 0.97,
+ "recall@5_ic": [
+  0.9775,
+  0.9975
+ ],
+ "full_chain@5_ic": [
+  0.945,
+  0.99
+ ],
+ "recall@10": 0.98875,
+ "full_chain@10": 0.97,
+ "recall@10_ic": [
+  0.9775,
+  0.9975
+ ],
+ "full_chain@10_ic": [
+  0.945,
+  0.99
+ ],
+ "recall@20": 0.99,
+ "full_chain@20": 0.975,
+ "recall@20_ic": [
+  0.98,
+  0.9975
+ ],
+ "full_chain@20_ic": [
+  0.95,
+  0.995
+ ]
+}

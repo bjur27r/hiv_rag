@@ -1,0 +1,90 @@
+{
+ "nombre": "plan_groq_qwen27b_sondeo",
+ "n": 200,
+ "por_tipo": {
+  "bridge_comparison": {
+   "n": 50,
+   "recall@2": 0.47,
+   "full_chain@2": 0.0,
+   "recall@5": 0.645,
+   "full_chain@5": 0.14,
+   "recall@10": 0.65,
+   "full_chain@10": 0.16,
+   "recall@20": 0.67,
+   "full_chain@20": 0.2
+  },
+  "comparison": {
+   "n": 50,
+   "recall@2": 0.91,
+   "full_chain@2": 0.82,
+   "recall@5": 1.0,
+   "full_chain@5": 1.0,
+   "recall@10": 1.0,
+   "full_chain@10": 1.0,
+   "recall@20": 1.0,
+   "full_chain@20": 1.0
+  },
+  "compositional": {
+   "n": 50,
+   "recall@2": 0.81,
+   "full_chain@2": 0.62,
+   "recall@5": 0.87,
+   "full_chain@5": 0.74,
+   "recall@10": 0.91,
+   "full_chain@10": 0.82,
+   "recall@20": 0.91,
+   "full_chain@20": 0.82
+  },
+  "inference": {
+   "n": 50,
+   "recall@2": 0.75,
+   "full_chain@2": 0.52,
+   "recall@5": 0.91,
+   "full_chain@5": 0.82,
+   "recall@10": 0.93,
+   "full_chain@10": 0.86,
+   "recall@20": 0.95,
+   "full_chain@20": 0.9
+  }
+ },
+ "recall@2": 0.735,
+ "full_chain@2": 0.49,
+ "recall@2_ic": [
+  0.69875,
+  0.77
+ ],
+ "full_chain@2_ic": [
+  0.425,
+  0.555
+ ],
+ "recall@5": 0.85625,
+ "full_chain@5": 0.675,
+ "recall@5_ic": [
+  0.82625,
+  0.885
+ ],
+ "full_chain@5_ic": [
+  0.61,
+  0.735
+ ],
+ "recall@10": 0.8725,
+ "full_chain@10": 0.71,
+ "recall@10_ic": [
+  0.8425,
+  0.8987812499999999
+ ],
+ "full_chain@10_ic": [
+  0.645,
+  0.77
+ ],
+ "recall@20": 0.8825,
+ "full_chain@20": 0.73,
+ "recall@20_ic": [
+  0.855,
+  0.90875
+ ],
+ "full_chain@20_ic": [
+  0.67,
+  0.79
+ ]
+}

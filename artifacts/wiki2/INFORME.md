@@ -522,3 +522,64 @@ validación JSON (mitigados con reintento); (3) qwen3.6-27b marca el suelo de
 capacidad. Decisión: benchmark con deepseek-chat (calidad máxima + API
 estable); groq oss-20b queda como alternativa validada sin gastar una mirada
 al benchmark. Medición en curso.
+
+## Análisis por estructura de salto (2026-08-25) — y por qué la profundidad rompe a HippoRAG y no a nosotros
+
+Los 4 tipos de 2Wiki codifican TRES estructuras de salto (en 2Wiki no existe el
+mono-salto: toda pregunta exige ≥2 pasajes). El harness ahora lo imprime
+siempre (`ESTRUCTURA_SALTO` en eval/wiki2.py):
+
+- **A. Sin puente** (`comparison`, n=244): las dos entidades vienen nombradas
+  en la pregunta; dos búsquedas paralelas, ninguna entidad que descubrir.
+- **B. Puente simple** (`compositional`+`inference`, n=521): una entidad
+  puente ausente de la pregunta; 2 saltos encadenados.
+- **C. Doble puente** (`bridge_comparison`, n=235): dos cadenas con puente y
+  comparación; 4 pasajes oro en 5 huecos.
+
+| FC@5 benchmark | A sin puente | B puente simple | C doble puente |
+|---|---|---|---|
+| HippoRAG 2 | 93,4 | 77,0 | **12,3** |
+| CatRAG v3 | 99,2 | 89,6 | **83,8** |
+
+**El modelo multiplicativo (por qué creemos que es así).** Si cada pasaje oro
+entrara en el top-5 de forma independiente con probabilidad p, entonces
+FC ≈ p^(nº de oros). Ajustando p con el grupo B (2 oros con puente) y
+prediciendo C (4 oros):
+
+- CatRAG v3: B 89,6 → p≈0,947; predicción C = 0,947⁴ ≈ **80,3** vs observado
+  **83,8** — el modelo ajusta (incluso algo mejor: las dos cadenas comparten
+  contexto). Nuestra degradación 99→90→84 es la ACUMULACIÓN de un error
+  residual por eslabón (~5%: juicio del filtro, huecos de extracción), no un
+  cambio de régimen.
+- HippoRAG 2: B 77,0 → p≈0,877; predicción C = 0,877⁴ ≈ **59,2** vs observado
+  **12,3** — 4,8× POR DEBAJO del modelo independiente. Su fallo en C no es
+  acumulativo: es ESTRUCTURAL.
+
+**El mecanismo del colapso de HippoRAG en C**: sus recursos por consulta son
+fijos y COMPARTIDOS entre las dos cadenas — el filtro selecciona ~≤4 triples y
+en la práctica se concentra en una cadena; la masa del PPR se reparte entre
+las dos películas nombradas; y el presupuesto k=5 deja UN solo hueco de
+holgura para 4 oros. Cuando la selección cubre solo una cadena, el puente de
+la otra nunca se siembra → FC=0 garantizado por diseño, por bien que ordene lo
+demás. La firma está en sus números: R@5 68,8 en C (encuentra ~2,7 de 4 oros:
+recall parcial alto) con FC 12,3 (cadena rota) — la tesis del paper de CatRAG,
+observada en su sistema sucesor y amplificada.
+
+**Por qué nuestros mecanismos quitan la dependencia de la profundidad**:
+(1) la identidad se resuelve en INDEXACIÓN (diccionario canónico): con
+sinonimia por umbral, cada eslabón extra es otra oportunidad de "isla" — la
+probabilidad de fallo por eslabón CRECE con la profundidad; con fusión
+canónica es ~constante; (2) los hechos son nodos con tránsito modulado (μ=1
+si el filtro los aprueba): la masa VIAJA a través del hecho aprobado en vez de
+competir con todas las aristas del concentrador; (3) la contabilidad explícita
+de la cadena escala con ella: la compuerta siembra TODAS las entidades de los
+hechos aprobados (recursos por eslabón, no por consulta), el pasaje propio
+convierte cada puente descubierto en pasaje sembrado, y el tope del
+filtro/plan crece con el nº de huecos (Plan A). Por qué A no es 100:
+casi-duplicados (secuelas, homónimos) en el ranking; por qué C < B incluso
+para nosotros: 4 oros en 5 huecos no dejan holgura — un solo distractor por
+encima del 4º oro rompe la cadena.
+
+Verificación futura: MuSiQue codifica el nº de saltos en el id de cada
+pregunta (2hop/3hop/4hop) → la curva FC-vs-saltos saldrá gratis en F2 y es el
+contraste directo de este modelo.

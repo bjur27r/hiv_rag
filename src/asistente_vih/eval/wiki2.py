@@ -49,6 +49,13 @@ KS_DEFECTO = (2, 5, 10, 20)
 N_BOOTSTRAP = 2000
 SEMILLA = 13
 
+# Agrupacion de los 4 tipos por ESTRUCTURA de salto (ver INFORME):
+ESTRUCTURA_SALTO = {
+    "A sin puente":    ("comparison",),
+    "B puente simple": ("compositional", "inference"),
+    "C doble puente":  ("bridge_comparison",),
+}
+
 
 # ---------------------------------------------------------------- carga
 
@@ -157,6 +164,20 @@ def evaluar(buscar, preguntas: list[dict], ks=KS_DEFECTO, nombre: str = "sistema
                 np.mean([f[f"recall@{k}"] for f in sel]))
             agg["por_tipo"][tipo][f"full_chain@{k}"] = float(
                 np.mean([f[f"full_chain@{k}"] for f in sel]))
+    # Estructura de salto: A sin puente (entidades nombradas; comparison),
+    # B puente simple (2 saltos; compositional+inference), C doble puente
+    # (2x2 saltos, 4 oros; bridge_comparison). En 2Wiki no hay mono-salto.
+    agg["por_salto"] = {}
+    for etiqueta, tipos in ESTRUCTURA_SALTO.items():
+        sel = [f for f in filas if f["type"] in tipos]
+        if not sel:
+            continue
+        agg["por_salto"][etiqueta] = {"n": len(sel)}
+        for k in ks:
+            agg["por_salto"][etiqueta][f"recall@{k}"] = float(
+                np.mean([f[f"recall@{k}"] for f in sel]))
+            agg["por_salto"][etiqueta][f"full_chain@{k}"] = float(
+                np.mean([f[f"full_chain@{k}"] for f in sel]))
 
     if guardar:
         WIKI2_DIR.mkdir(parents=True, exist_ok=True)
@@ -181,6 +202,11 @@ def imprimir(agg: dict, ks=KS_DEFECTO) -> None:
         print(f"  {tipo:18s} (n={d['n']:4d})  " + "  ".join(
             f"R@{k} {100*d[f'recall@{k}']:5.1f}% FC@{k} {100*d[f'full_chain@{k}']:5.1f}%"
             for k in (2, 5)))
+    if agg.get("por_salto"):
+        print("  -- por estructura de salto --")
+        for et, d in agg["por_salto"].items():
+            print(f"  {et:18s} (n={d['n']:4d})  R@5 {100*d['recall@5']:5.1f}%  "
+                  f"FC@5 {100*d['full_chain@5']:5.1f}%")
 
 
 # ---------------------------------------------------------------- BM25 humo

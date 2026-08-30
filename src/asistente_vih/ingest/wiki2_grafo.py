@@ -86,19 +86,20 @@ def _sinonimias(ids: list[str], mat: np.ndarray) -> list[tuple[str, str]]:
     return pares
 
 
-def construir(split: str, canonico: bool = False) -> None:
+def construir(split: str, canonico: bool = False, ver: str = "") -> None:
     """canonico=True: los nodos-entidad son las entradas del diccionario
     (ingest.wiki2_entidades); cada mencion se resuelve a su id canonico y las
     variantes de nombre colapsan en UN nodo. Sin aristas de sinonimia (la
-    fusion las sustituye). Salida grafo_<split>_canon.graphml."""
+    fusion las sustituye). Salida grafo_<split>_canon<ver>.graphml, donde
+    `ver` es el sufijo de version del diccionario (vacio = v3)."""
     docs = [json.loads(l) for l in
             open(WIKI2_DIR / f"openie_{split}.jsonl", encoding="utf-8")]
     client = OpenAI()
     mapa: dict[str, str] = {}
     if canonico:
-        mapa = json.loads((WIKI2_DIR / f"entidades_mapa_{split}.json").read_text(encoding="utf-8"))
+        mapa = json.loads((WIKI2_DIR / f"entidades_mapa_{split}{ver}.json").read_text(encoding="utf-8"))
         entradas = {e["id"]: e for e in
-                    json.loads((WIKI2_DIR / f"entidades_{split}.json").read_text(encoding="utf-8"))}
+                    json.loads((WIKI2_DIR / f"entidades_{split}{ver}.json").read_text(encoding="utf-8"))}
 
     def nodo_ent(titulo: str, forma: str) -> str:
         if canonico:
@@ -165,7 +166,7 @@ def construir(split: str, canonico: bool = False) -> None:
     if canonico:
         # los embeddings de entidad canonica son las fichas del diccionario
         # (emb_fichas_<split>.npz, ya construidas); sin sinonimia vectorial.
-        sufijo = "_canon"
+        sufijo = "_canon" + ver
     else:
         ent_ids = sorted(ent_forma)
         emb_ent = _embeber(client, [ent_forma[e] for e in ent_ids],
@@ -187,11 +188,13 @@ def construir(split: str, canonico: bool = False) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--split", choices=["sondeo", "benchmark"], required=True)
+    ap.add_argument("--split", required=True,
+                    help="benchmark, sondeo, hotpot_benchmark, hotpot_sondeo, musique_*")
     ap.add_argument("--canonico", action="store_true",
                     help="nodos-entidad = diccionario canonico (wiki2_entidades)")
+    ap.add_argument("--ver", default="", help="sufijo de version del diccionario (p.ej. _v4)")
     args = ap.parse_args()
-    construir(args.split, canonico=args.canonico)
+    construir(args.split, canonico=args.canonico, ver=args.ver)
 
 
 if __name__ == "__main__":

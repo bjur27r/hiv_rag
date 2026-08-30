@@ -38,37 +38,91 @@ import numpy as np
 
 from ..config import ARTIFACTS_DIR, ROOT, DATA_DIR
 
-SUBSET_PATH = ROOT / "HippoRAG" / "reproduce" / "dataset" / "2wikimultihopqa.json"
-CORPUS_PATH = ROOT / "HippoRAG" / "reproduce" / "dataset" / "2wikimultihopqa_corpus.json"
-# Pese al nombre del fichero, es el dev oficial de 2Wiki (12.576 con oro);
-# los dev.json/test.json descargados son el test sin oro (inutiles).
-DEV_ETIQUETADO_PATH = DATA_DIR / "2wiki" / "train.json"
+_DS = ROOT / "HippoRAG" / "reproduce" / "dataset"
+# Conjuntos de datos: subsets de reproduccion de HippoRAG 2 (= los de CatRAG),
+# fuente etiquetada para el sondeo (disjunta del subset) y prefijo de los
+# splits/artefactos ("" para 2Wiki por compatibilidad: 'benchmark'/'sondeo';
+# 'hotpot_benchmark'/'hotpot_sondeo'; 'musique_benchmark'/'musique_sondeo').
+DATASETS = {
+    "2wiki": {"subset": _DS / "2wikimultihopqa.json", "corpus": _DS / "2wikimultihopqa_corpus.json",
+              # Pese al nombre del fichero, es el dev oficial de 2Wiki (12.576 con oro);
+              # los dev.json/test.json descargados son el test sin oro (inutiles).
+              "etiquetado": DATA_DIR / "2wiki" / "train.json", "prefijo": ""},
+    "hotpot": {"subset": _DS / "hotpotqa.json", "corpus": _DS / "hotpotqa_corpus.json",
+               "etiquetado": DATA_DIR / "hotpotqa" / "hotpot_train_v1.1.json", "prefijo": "hotpot_"},
+    "musique": {"subset": _DS / "musique.json", "corpus": _DS / "musique_corpus.json",
+                "etiquetado": DATA_DIR / "musique" / "musique_ans_v1.0_train.jsonl", "prefijo": "musique_"},
+}
+SUBSET_PATH = DATASETS["2wiki"]["subset"]
+CORPUS_PATH = DATASETS["2wiki"]["corpus"]
+DEV_ETIQUETADO_PATH = DATASETS["2wiki"]["etiquetado"]
 WIKI2_DIR = ARTIFACTS_DIR / "wiki2"
 
 KS_DEFECTO = (2, 5, 10, 20)
 N_BOOTSTRAP = 2000
 SEMILLA = 13
 
-# Agrupacion de los 4 tipos por ESTRUCTURA de salto (ver INFORME):
+# Agrupacion de los tipos por ESTRUCTURA de salto (ver INFORME), por conjunto.
 ESTRUCTURA_SALTO = {
     "A sin puente":    ("comparison",),
     "B puente simple": ("compositional", "inference"),
     "C doble puente":  ("bridge_comparison",),
 }
+ESTRUCTURAS = {
+    "2wiki": ESTRUCTURA_SALTO,
+    "hotpot": {"A sin puente": ("comparison",), "B puente simple": ("bridge",)},
+    "musique": {"2 saltos": ("2hop",), "3 saltos": ("3hop",), "4 saltos": ("4hop",)},
+}
 
 
 # ---------------------------------------------------------------- carga
 
-def cargar_benchmark() -> tuple[list[dict], list[dict]]:
-    preguntas = json.loads(SUBSET_PATH.read_text(encoding="utf-8"))
-    corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
+def dataset_de(split: str) -> str:
+    """'benchmark'/'sondeo' -> 2wiki; 'hotpot_*' -> hotpot; 'musique_*' -> musique."""
+    for nombre, d in DATASETS.items():
+        if d["prefijo"] and split.startswith(d["prefijo"]):
+            return nombre
+    return "2wiki"
+
+
+def normalizar(q: dict, dataset: str) -> dict:
+    """Esquema comun: _id, question, answer, type, supporting_facts [[titulo, i]].
+    2Wiki y HotpotQA ya lo cumplen; MuSiQue trae id/paragraphs[is_supporting]
+    y el tipo es el numero de saltos de question_decomposition."""
+    if dataset == "musique":
+        q = dict(q)
+        q["_id"] = q.get("_id") or q["id"]
+        q["type"] = f"{len(q.get('question_decomposition', []))}hop"
+        q["supporting_facts"] = [[p["title"], p.get("idx", i)] for i, p in enumerate(q["paragraphs"])
+                                 if p.get("is_supporting")]
+    return q
+
+
+def cargar_benchmark(dataset: str = "2wiki") -> tuple[list[dict], list[dict]]:
+    d = DATASETS[dataset]
+    preguntas = [normalizar(q, dataset) for q in json.loads(d["subset"].read_text(encoding="utf-8"))]
+    corpus = json.loads(d["corpus"].read_text(encoding="utf-8"))
     return preguntas, corpus
 
 
-def cargar_sondeo() -> tuple[list[dict], list[dict]]:
-    preguntas = json.loads((WIKI2_DIR / "sondeo_preguntas.json").read_text(encoding="utf-8"))
-    corpus = json.loads((WIKI2_DIR / "sondeo_corpus.json").read_text(encoding="utf-8"))
+def cargar_sondeo(dataset: str = "2wiki") -> tuple[list[dict], list[dict]]:
+    pre = DATASETS[dataset]["prefijo"]
+    preguntas = json.loads((WIKI2_DIR / f"{pre}sondeo_preguntas.json").read_text(encoding="utf-8"))
+    corpus = json.loads((WIKI2_DIR / f"{pre}sondeo_corpus.json").read_text(encoding="utf-8"))
     return preguntas, corpus
+
+
+def cargar_split(split: str) -> tuple[list[dict], list[dict]]:
+    """'benchmark', 'sondeo', 'hotpot_benchmark', 'hotpot_sondeo', 'musique_*'."""
+    ds = dataset_de(split)
+    return cargar_sondeo(ds) if split.endswith("sondeo") else cargar_benchmark(ds)
+
+
+def ruta_corpus(split: str):
+    """Fichero del corpus de un split (para openie/catrag)."""
+    if split.endswith("sondeo"):
+        return WIKI2_DIR / f"{split}_corpus.json"
+    return DATASETS[dataset_de(split)]["corpus"]
 
 
 def titulos_oro(pregunta: dict) -> set[str]:
@@ -77,14 +131,72 @@ def titulos_oro(pregunta: dict) -> set[str]:
 
 # ---------------------------------------------------------------- splits
 
-def generar_splits(n_por_tipo: int = 50, semilla: int = SEMILLA) -> None:
-    """Sondeo estratificado por tipo desde el dev etiquetado (sin ids del
-    benchmark) + su mini-corpus; el resto de ids, a calibracion."""
+def _candidatas_etiquetadas(dataset: str, ids_benchmark: set[str]) -> list[dict]:
+    """Preguntas etiquetadas fuera del benchmark, normalizadas. HotpotQA: solo
+    nivel 'hard' (el subset de reproduccion es integramente 'hard')."""
+    ruta = DATASETS[dataset]["etiquetado"]
+    if dataset == "musique":
+        crudas = [json.loads(l) for l in open(ruta, encoding="utf-8")]
+    elif dataset == "hotpot" and not ruta.exists():
+        crudas = _hotpot_desde_parquet(ruta.parent)
+    else:
+        crudas = json.loads(ruta.read_text(encoding="utf-8"))
+    out = []
+    for q in crudas:
+        q = normalizar(q, dataset)
+        if q["_id"] in ids_benchmark or not q.get("answer"):
+            continue
+        if dataset == "hotpot" and q.get("level") != "hard":
+            continue
+        if dataset == "musique" and not q.get("answerable", True):
+            continue
+        out.append(q)
+    return out
+
+
+def _hotpot_desde_parquet(carpeta) -> list[dict]:
+    """El servidor oficial (curtis.ml.cmu.edu) no responde; el espejo de
+    HuggingFace (hotpotqa/hotpot_qa, config 'distractor', split train) sirve
+    parquet con columnas anidadas. Se convierte al esquema original:
+    supporting_facts [[titulo, sent_id]], context [[titulo, [frases]]]."""
+    import pyarrow.parquet as pq
+    ficheros = sorted(carpeta.glob("train-*.parquet"))
+    if not ficheros:
+        raise FileNotFoundError(f"ni JSON ni parquet del train de HotpotQA en {carpeta}")
+    out = []
+    for f in ficheros:
+        t = pq.read_table(f).to_pylist()
+        for r in t:
+            sf, cx = r["supporting_facts"], r["context"]
+            out.append({"_id": r["id"], "question": r["question"], "answer": r["answer"],
+                        "type": r["type"], "level": r["level"],
+                        "supporting_facts": [[a, b] for a, b in zip(sf["title"], sf["sent_id"])],
+                        "context": [[a, list(b)] for a, b in zip(cx["title"], cx["sentences"])]})
+    return out
+
+
+def _mini_corpus(sondeo: list[dict], dataset: str) -> dict[str, str]:
+    """Union deduplicada (por titulo) de los contextos de las preguntas."""
+    mini: dict[str, str] = {}
+    for q in sondeo:
+        if dataset == "musique":
+            for p in q["paragraphs"]:
+                mini.setdefault(p["title"], p["paragraph_text"])
+        else:
+            for titulo, frases in q["context"]:
+                mini.setdefault(titulo, " ".join(frases))
+    return mini
+
+
+def generar_splits(n_por_tipo: int = 50, semilla: int = SEMILLA, dataset: str = "2wiki") -> None:
+    """Sondeo estratificado por tipo desde el conjunto etiquetado (sin ids del
+    benchmark) + su mini-corpus; el resto de ids, a calibracion. Ficheros con
+    el prefijo del conjunto (2Wiki sin prefijo, por compatibilidad)."""
     WIKI2_DIR.mkdir(parents=True, exist_ok=True)
-    benchmark, corpus = cargar_benchmark()
+    pre = DATASETS[dataset]["prefijo"]
+    benchmark, corpus = cargar_benchmark(dataset)
     ids_benchmark = {q["_id"] for q in benchmark}
-    dev = json.loads(DEV_ETIQUETADO_PATH.read_text(encoding="utf-8"))
-    candidatas = [q for q in dev if q["_id"] not in ids_benchmark and q.get("answer")]
+    candidatas = _candidatas_etiquetadas(dataset, ids_benchmark)
 
     rng = random.Random(semilla)
     por_tipo: dict[str, list[dict]] = defaultdict(list)
@@ -94,11 +206,7 @@ def generar_splits(n_por_tipo: int = 50, semilla: int = SEMILLA) -> None:
     for tipo in sorted(por_tipo):
         sondeo.extend(rng.sample(por_tipo[tipo], min(n_por_tipo, len(por_tipo[tipo]))))
 
-    # Mini-corpus: union deduplicada (por titulo) de los contextos del sondeo.
-    mini: dict[str, str] = {}
-    for q in sondeo:
-        for titulo, frases in q["context"]:
-            mini.setdefault(titulo, " ".join(frases))
+    mini = _mini_corpus(sondeo, dataset)
     mini_corpus = [{"title": t, "text": x} for t, x in sorted(mini.items())]
 
     # Verificacion: el oro de cada split esta dentro de su corpus.
@@ -110,17 +218,17 @@ def generar_splits(n_por_tipo: int = 50, semilla: int = SEMILLA) -> None:
     ids_sondeo = {q["_id"] for q in sondeo}
     calibracion = [q["_id"] for q in candidatas if q["_id"] not in ids_sondeo]
 
-    (WIKI2_DIR / "sondeo_preguntas.json").write_text(
+    (WIKI2_DIR / f"{pre}sondeo_preguntas.json").write_text(
         json.dumps(sondeo, ensure_ascii=False, indent=1), encoding="utf-8")
-    (WIKI2_DIR / "sondeo_corpus.json").write_text(
+    (WIKI2_DIR / f"{pre}sondeo_corpus.json").write_text(
         json.dumps(mini_corpus, ensure_ascii=False, indent=1), encoding="utf-8")
-    (WIKI2_DIR / "calibracion_ids.json").write_text(
+    (WIKI2_DIR / f"{pre}calibracion_ids.json").write_text(
         json.dumps(calibracion), encoding="utf-8")
 
-    print(f"Benchmark: {len(benchmark)} preguntas / {len(corpus)} pasajes (no se toca)")
+    print(f"{dataset} benchmark: {len(benchmark)} preguntas / {len(corpus)} pasajes (no se toca)")
     print(f"Sondeo: {len(sondeo)} preguntas ({dict(Counter(q['type'] for q in sondeo))}) "
           f"/ mini-corpus {len(mini_corpus)} pasajes")
-    print(f"Calibracion: {len(calibracion)} ids en {WIKI2_DIR / 'calibracion_ids.json'}")
+    print(f"Calibracion: {len(calibracion)} ids en {WIKI2_DIR / f'{pre}calibracion_ids.json'}")
 
 
 # ---------------------------------------------------------------- metricas
@@ -168,7 +276,10 @@ def evaluar(buscar, preguntas: list[dict], ks=KS_DEFECTO, nombre: str = "sistema
     # B puente simple (2 saltos; compositional+inference), C doble puente
     # (2x2 saltos, 4 oros; bridge_comparison). En 2Wiki no hay mono-salto.
     agg["por_salto"] = {}
-    for etiqueta, tipos in ESTRUCTURA_SALTO.items():
+    tipos_presentes = {f["type"] for f in filas}
+    estructura = next((e for e in ESTRUCTURAS.values()
+                       if tipos_presentes <= {t for ts in e.values() for t in ts}), ESTRUCTURA_SALTO)
+    for etiqueta, tipos in estructura.items():
         sel = [f for f in filas if f["type"] in tipos]
         if not sel:
             continue
@@ -254,19 +365,17 @@ class BM25Wiki:
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
     ap.add_argument("--generar-splits", action="store_true")
+    ap.add_argument("--dataset", choices=list(DATASETS), default="2wiki")
     ap.add_argument("--n-por-tipo", type=int, default=50)
-    ap.add_argument("--bm25", choices=["benchmark", "sondeo"],
-                    help="corre el baseline BM25 sobre ese split")
+    ap.add_argument("--bm25", help="corre el baseline BM25 sobre ese split "
+                    "(benchmark, sondeo, hotpot_benchmark, hotpot_sondeo, musique_*)")
     ap.add_argument("--k", type=int, nargs="+", default=list(KS_DEFECTO))
     args = ap.parse_args()
 
     if args.generar_splits:
-        generar_splits(n_por_tipo=args.n_por_tipo)
+        generar_splits(n_por_tipo=args.n_por_tipo, dataset=args.dataset)
     if args.bm25:
-        if args.bm25 == "benchmark":
-            preguntas, corpus = cargar_benchmark()
-        else:
-            preguntas, corpus = cargar_sondeo()
+        preguntas, corpus = cargar_split(args.bm25)
         bm25 = BM25Wiki(corpus)
         agg = evaluar(bm25.buscar, preguntas, ks=tuple(args.k),
                       nombre=f"bm25_{args.bm25}")

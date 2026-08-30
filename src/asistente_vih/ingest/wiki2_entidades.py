@@ -8,23 +8,30 @@ cualquier dominio; Wikidata queda como verificacion opcional).
 
 Pasos:
   1. Ficha por MENCION (entidad x pasaje): nombre + descriptores (frases de
-     las aserciones de ese pasaje en las que participa) -> embedding.
+     las aserciones de ese pasaje en las que participa) -> embedding. La
+     ficha-titulo (sujeto del articulo) HEREDA las fechas del sujeto si no
+     tiene propias (evita fundir homonimos: 'Christopher Newton (criminal)').
   2. Candidatos a misma entidad: coseno entre fichas >= UMBRAL_CAND y nombres
      compatibles (token significativo comun o coseno de nombre alto) y sin
      contradiccion de fechas de nacimiento/muerte.
-  3. Adjudicacion: coseno de ficha >= UMBRAL_AUTO -> fusion automatica;
-     banda [UMBRAL_CAND, UMBRAL_AUTO) -> LLM decide viendo las dos fichas
-     (lotes, cache SQLite). Union-find -> grupos.
+  3. Adjudicacion: nombre base identico -> fusion automatica, SALVO que una de
+     las formas lleve desambiguador entre parentesis (-> juez); banda ambigua
+     -> LLM decide viendo las dos fichas (lotes, cache SQLite). Titulo->sujeto:
+     automatica solo cuando el titulo es mencion SINTETICA (no extraida) y el
+     sujeto es unico; si el titulo ya es mencion propia o hay empate -> juez.
+     Union-find -> grupos. Cada union queda REGISTRADA con su origen.
   4. Entrada canonica por grupo: nombre (preferencia: titulo de pasaje),
      alias, descripcion fusionada, pasajes; embedding de la ficha fusionada.
 
-Salida (artifacts/wiki2/):
-  entidades_<split>.json        lista de entradas canonicas
-  entidades_mapa_<split>.json   "titulo||forma_plegada" -> id canonico
-  emb_fichas_<split>.npz        ids canonicos + matriz (ficha fusionada)
+Salida (artifacts/wiki2/), con sufijo de version `ver` (p.ej. "_v4"; vacio =
+la version evaluada en el documento, v3):
+  entidades_<split><ver>.json           lista de entradas canonicas
+  entidades_mapa_<split><ver>.json      "titulo||forma_plegada" -> id canonico
+  entidades_uniones_<split><ver>.jsonl  procedencia: {a, b, origen} por union
+  emb_fichas_<split><ver>.npz           ids canonicos + matriz (ficha fusionada)
 
-    python -m asistente_vih.ingest.wiki2_entidades --split sondeo
-    python -m asistente_vih.ingest.wiki2_entidades --split benchmark
+    python -m asistente_vih.ingest.wiki2_entidades --split sondeo --ver _v4
+    python -m asistente_vih.ingest.wiki2_entidades --split benchmark --legado --ver _legado --sin-embeddings
 """
 from __future__ import annotations
 
@@ -32,7 +39,7 @@ import argparse
 import json
 import re
 import sqlite3
-from collections import defaultdict
+from collections import Counter, defaultdict
 
 import numpy as np
 from openai import OpenAI
@@ -50,6 +57,11 @@ LOTE_LLM = 8            # pares por llamada de adjudicacion
 _GENERICOS = {"the", "and", "of", "de", "la", "el", "von", "van", "der", "di",
               "film", "song", "duke", "king", "prince", "princess", "count"}
 
+# Origenes de union (procedencia, E2): quien decidio que dos fichas son la
+# misma entidad.
+ORIGENES = ("auto_nombre", "auto_casi", "titulo_sintetico",
+            "juez_vecinos", "juez_titulo_mencion", "juez_titulo_empate")
+
 
 def _plegar(s: str) -> str:
     return " ".join(s.lower().split())
@@ -58,6 +70,12 @@ def _plegar(s: str) -> str:
 def _tokens_sig(nombre: str) -> set[str]:
     toks = re.findall(r"[a-z0-9]+", re.sub(r"\(.*?\)", " ", nombre.lower()))
     return {t for t in toks if len(t) > 2 and t not in _GENERICOS}
+
+
+def _desambiguador(forma: str) -> str:
+    """Texto entre parentesis de un titulo/forma ('(criminal)', '(1958 film)')."""
+    m = re.search(r"\(([^)]*)\)", forma)
+    return _plegar(m.group(1)) if m else ""
 
 
 def _anios(aserciones: list[dict], entidad_pleg: str, rel: str) -> set[str]:
@@ -83,34 +101,72 @@ def _embeber(client: OpenAI, textos: list[str]) -> np.ndarray:
 
 # ------------------------------------------------------------ paso 1: fichas
 
-def fichas_por_mencion(docs: list[dict]) -> list[dict]:
+def _mejor_sujeto(fichas: list[dict], idx: list[int], t: int) -> tuple[int | None, bool]:
+    """Candidato a SUJETO del articulo para la ficha-titulo t: la mencion
+    no-titulo del pasaje con mayor solape de tokens significativos (>=1),
+    desempatando por la que es sujeto de mas aserciones (longitud de desc).
+    Devuelve (mejor, empate): empate = otra mencion con el mismo solape."""
+    toks_t = _tokens_sig(fichas[t]["forma"])
+    puntuados = []
+    for i in idx:
+        if i == t or fichas[i]["es_titulo"]:
+            continue
+        sol = len(toks_t & _tokens_sig(fichas[i]["forma"]))
+        if sol >= 1 and _fechas_compatibles(fichas[t], fichas[i]):
+            puntuados.append(((sol, len(fichas[i]["desc"])), -i))   # -i: a igualdad, la primera
+    if not puntuados:
+        return None, False
+    puntuados.sort(reverse=True)
+    empate = len(puntuados) > 1 and puntuados[1][0][0] == puntuados[0][0][0]
+    return -puntuados[0][1], empate
+
+
+def fichas_por_mencion(docs: list[dict], heredar_fechas: bool = True) -> list[dict]:
     """Una ficha por (pasaje, entidad). Ademas, el TITULO del pasaje se registra
     como mencion propia (alias del sujeto del articulo): un articulo de
     enciclopedia nombra a su sujeto en el titulo, y los demas pasajes suelen
     referirse a el por esa forma ('Charles Band') aunque el texto use la forma
-    legal ('Charles Robert Band'). Se une al sujeto en `unir_titulos`."""
+    legal ('Charles Robert Band'). Se une al sujeto en `unir_titulos`.
+
+    heredar_fechas: la ficha-titulo sin fechas propias toma las del sujeto
+    candidato unico del pasaje (v4). Con False se reproduce la v3."""
     fichas = []
     for d in docs:
         titulo = d["chunk_id"]
         base = re.sub(r"\(.*?\)", " ", titulo).strip()
         entidades = list(d["entidades"])
-        if _plegar(base) not in {_plegar(e) for e in entidades} and \
-                _plegar(titulo) not in {_plegar(e) for e in entidades}:
+        formas_pleg = {_plegar(e) for e in entidades}
+        sintetica = _plegar(base) not in formas_pleg and _plegar(titulo) not in formas_pleg
+        if sintetica:
             entidades.append(base)                 # mencion sintetica = titulo
+        inicio = len(fichas)
         for forma in entidades:
             pleg = _plegar(forma)
             frases = [a["descripcion_relacion"] for a in d["aserciones"]
                       if pleg in _plegar(a["descripcion_relacion"]) or
                       pleg in (_plegar(a["sujeto"]), _plegar(a["objeto"]))]
             desc = " ".join(dict.fromkeys(f for f in frases if f))[:400]
+            es_titulo = _plegar(titulo) == pleg or _plegar(base) == pleg
             fichas.append({
                 "clave": f"{titulo}||{pleg}", "forma": forma, "pleg": pleg,
-                "pasaje": titulo, "es_titulo": _plegar(titulo) == pleg or
-                _plegar(re.sub(r"\(.*?\)", "", titulo)).strip() == pleg,
+                "pasaje": titulo, "es_titulo": es_titulo,
+                "sintetica": bool(sintetica and es_titulo),
+                "desamb": _desambiguador(titulo) if es_titulo else _desambiguador(forma),
                 "desc": desc,
                 "nac": _anios(d["aserciones"], pleg, "DATE_OF_BIRTH"),
                 "mue": _anios(d["aserciones"], pleg, "DATE_OF_DEATH"),
+                "fechas_heredadas": False,
             })
+        if heredar_fechas:
+            idx = list(range(inicio, len(fichas)))
+            tit = [i for i in idx if fichas[i]["es_titulo"]]
+            if tit and not fichas[tit[0]]["nac"] and not fichas[tit[0]]["mue"]:
+                mejor, empate = _mejor_sujeto(fichas, idx, tit[0])
+                if mejor is not None and not empate and \
+                        (fichas[mejor]["nac"] or fichas[mejor]["mue"]):
+                    fichas[tit[0]]["nac"] = set(fichas[mejor]["nac"])
+                    fichas[tit[0]]["mue"] = set(fichas[mejor]["mue"])
+                    fichas[tit[0]]["fechas_heredadas"] = True
     return fichas
 
 
@@ -118,30 +174,31 @@ def _texto_ficha(f: dict) -> str:
     return f"{f['forma']} — {f['desc']}" if f["desc"] else f["forma"]
 
 
-def unir_titulos(fichas: list[dict], uf: "_UF") -> int:
-    """Une la mencion-titulo de cada pasaje con la mencion del SUJETO del
-    pasaje: la de mayor solape de tokens significativos con el titulo (>=1),
-    desempatando por la que es sujeto de mas aserciones (longitud de desc)."""
+def unir_titulos(fichas: list[dict]) -> list[tuple[int, int, str]]:
+    """Propone unir la mencion-titulo de cada pasaje con su sujeto candidato.
+    Devuelve (titulo, sujeto, caso):
+      titulo_sintetico         titulo no extraido, sujeto unico -> union directa
+      titulo_sintetico_empate  titulo no extraido, varios sujetos -> juez
+      titulo_mencion           el titulo YA es mencion propia -> juez (la v3 lo
+                               unia siempre y fundia parientes/secuelas)."""
     por_pasaje: dict[str, list[int]] = defaultdict(list)
     for i, f in enumerate(fichas):
         por_pasaje[f["pasaje"]].append(i)
-    uniones = 0
+    props = []
     for pasaje, idx in por_pasaje.items():
         tit = [i for i in idx if fichas[i]["es_titulo"]]
         if not tit:
             continue
-        t = tit[0]; toks_t = _tokens_sig(fichas[t]["forma"])
-        mejor, mejor_key = None, (0, 0)
-        for i in idx:
-            if i == t or fichas[i]["es_titulo"]:
-                continue
-            sol = len(toks_t & _tokens_sig(fichas[i]["forma"]))
-            key = (sol, len(fichas[i]["desc"]))
-            if sol >= 1 and key > mejor_key and _fechas_compatibles(fichas[t], fichas[i]):
-                mejor, mejor_key = i, key
-        if mejor is not None:
-            uf.union(t, mejor); uniones += 1
-    return uniones
+        t = tit[0]
+        mejor, empate = _mejor_sujeto(fichas, idx, t)
+        if mejor is None:
+            continue
+        if fichas[t]["sintetica"]:
+            caso = "titulo_sintetico_empate" if empate else "titulo_sintetico"
+        else:
+            caso = "titulo_mencion"
+        props.append((t, mejor, caso))
+    return props
 
 
 # ------------------------------------------------------------ paso 2-3: grupos
@@ -168,15 +225,22 @@ def _fechas_compatibles(a: dict, b: dict) -> bool:
     return not (oa and ob and oa != ob)
 
 
-def _clasificar_par(a: dict, b: dict, cos_ficha: float, cos_nombre: float) -> str | None:
-    """'auto' (fusion directa), 'llm' (adjudicar) o None (descartar).
-    Canal principal = NOMBRE; la ficha aporta evidencia de contexto."""
+def _clasificar_par(a: dict, b: dict, cos_ficha: float, cos_nombre: float,
+                    legado: bool = False) -> str | None:
+    """'auto_nombre' / 'auto_casi' (fusion directa), 'llm' (adjudicar) o None
+    (descartar). Canal principal = NOMBRE; la ficha aporta contexto."""
     if not _fechas_compatibles(a, b):
         return None
+    da, db = a.get("desamb", ""), b.get("desamb", "")
+    desamb_distinto = (not legado) and bool(da or db) and da != db
     if _nombre_base(a["forma"]) == _nombre_base(b["forma"]):
-        return "auto"                                   # nombre identico
+        if desamb_distinto:
+            return "llm"                                # homonimo con desambiguador
+        return "auto_nombre"                            # nombre identico
     if cos_nombre >= 0.90 and cos_ficha >= 0.70:
-        return "auto"                                   # casi identico + contexto afin
+        if desamb_distinto:
+            return "llm"                                # 'The Girl of the Golden West (1922)' vs '(1923)'
+        return "auto_casi"                              # casi identico + contexto afin
     if cos_nombre >= UMBRAL_NOMBRE:
         return "llm"                                    # variante de nombre
     if cos_ficha >= UMBRAL_CAND and len(_tokens_sig(a["forma"]) & _tokens_sig(b["forma"])) >= 1:
@@ -240,13 +304,20 @@ def _adjudicar(client: OpenAI, con: sqlite3.Connection,
     return si
 
 
-def construir(split: str) -> None:
+def construir(split: str, ver: str = "", legado: bool = False,
+              sin_embeddings: bool = False) -> None:
+    """legado=True reproduce la logica de la v3 (sin herencia de fechas, sin
+    regla de desambiguador, titulo->sujeto siempre automatico): sirve para
+    escribir la PROCEDENCIA de las uniones de la version evaluada sin tocarla.
+    sin_embeddings=True omite la ficha fusionada (npz) — para auditorias."""
     docs = [json.loads(l) for l in open(WIKI2_DIR / f"openie_{split}.jsonl", encoding="utf-8")]
     client = OpenAI()
-    fichas = fichas_por_mencion(docs)
-    print(f"{split}: {len(fichas)} menciones de entidad en {len(docs)} pasajes")
+    fichas = fichas_por_mencion(docs, heredar_fechas=not legado)
+    n_her = sum(1 for f in fichas if f["fechas_heredadas"])
+    print(f"{split}{ver}: {len(fichas)} menciones de entidad en {len(docs)} pasajes"
+          f"{' (legado)' if legado else f'; fichas-titulo con fechas heredadas: {n_her}'}")
 
-    # embeddings de fichas y de nombres (cache npz)
+    # embeddings de fichas y de nombres (cache npz; independiente de la version)
     ruta_f = WIKI2_DIR / f"emb_menciones_{split}.npz"
     if ruta_f.exists() and len(np.load(ruta_f)["ids"]) == len(fichas):
         d = np.load(ruta_f); F, N = d["F"], d["N"]
@@ -256,8 +327,9 @@ def construir(split: str) -> None:
         np.savez_compressed(ruta_f, ids=np.array([f["clave"] for f in fichas]), F=F, N=N)
 
     # candidatos por DOS canales: vecinos por nombre (principal) y por ficha
-    uf = _UF(len(fichas)); ambiguos = set()
-    auto = 0
+    uf = _UF(len(fichas))
+    uniones: list[tuple[int, int, str]] = []      # procedencia
+    ambiguos: dict[tuple[int, int], str] = {}     # par -> origen si el juez dice si
     for i0 in range(0, len(fichas), 2000):
         bloque_f = F[i0:i0 + 2000] @ F.T
         bloque_n = N[i0:i0 + 2000] @ N.T
@@ -272,27 +344,39 @@ def construir(split: str) -> None:
                 cf, cn = float(fila_f[j]), float(fila_n[j])
                 if cn < UMBRAL_NOMBRE and cf < UMBRAL_CAND:
                     continue
-                veredicto = _clasificar_par(fichas[i], fichas[j], cf, cn)
-                if veredicto == "auto":
-                    uf.union(i, j); auto += 1
+                veredicto = _clasificar_par(fichas[i], fichas[j], cf, cn, legado=legado)
+                if veredicto in ("auto_nombre", "auto_casi"):
+                    uf.union(i, j); uniones.append((i, j, veredicto))
                 elif veredicto == "llm":
-                    ambiguos.add((i, j))
-    ambiguos = sorted(ambiguos)
-    n_tit = unir_titulos(fichas, uf)
-    print(f"  fusiones automaticas: {auto} | titulo->sujeto: {n_tit} | "
-          f"pares ambiguos para el LLM: {len(ambiguos)}")
+                    ambiguos.setdefault((i, j), "juez_vecinos")
+    n_auto = len(uniones)
+    n_tit = 0
+    for t, m, caso in unir_titulos(fichas):
+        par = (min(t, m), max(t, m))
+        if legado or caso == "titulo_sintetico":
+            uf.union(t, m); uniones.append((par[0], par[1], caso)); n_tit += 1
+        else:
+            ambiguos.setdefault(par, "juez_" + caso)
+    print(f"  fusiones automaticas: {n_auto} | titulo->sujeto directas: {n_tit} | "
+          f"pares para el juez: {len(ambiguos)} "
+          f"({dict(Counter(ambiguos.values()))})")
 
     WIKI2_DIR.mkdir(exist_ok=True)
-    con = sqlite3.connect(WIKI2_DIR / "entidades_cache.sqlite")
+    con = sqlite3.connect(WIKI2_DIR / "entidades_cache.sqlite", timeout=120)  # varios procesos
     con.execute("CREATE TABLE IF NOT EXISTS adj (k TEXT PRIMARY KEY, r TEXT)")
-    for i, j in _adjudicar(client, con, ambiguos, fichas):
-        uf.union(i, j)
+    aceptados = _adjudicar(client, con, sorted(ambiguos), fichas)
+    for i, j in sorted(aceptados):
+        uf.union(i, j); uniones.append((i, j, ambiguos[(i, j)]))
+    print(f"  uniones por origen: {dict(Counter(o for _, _, o in uniones))}")
 
     # entradas canonicas
     grupos: dict[int, list[int]] = defaultdict(list)
     for i in range(len(fichas)):
         grupos[uf.find(i)].append(i)
-    entradas, mapa = [], {}
+    origen_grupo: dict[int, Counter] = defaultdict(Counter)
+    for i, j, o in uniones:
+        origen_grupo[uf.find(i)][o] += 1
+    entradas, mapa, ids_usados = [], {}, set()
     for gid, miembros in grupos.items():
         fs = [fichas[i] for i in miembros]
         titulos = [f for f in fs if f["es_titulo"]]
@@ -301,32 +385,46 @@ def construir(split: str) -> None:
         alias = sorted({f["forma"] for f in fs} | ({f["pasaje"] for f in titulos}))
         desc = " ".join(dict.fromkeys(fr for f in fs for fr in f["desc"].split(". ") if fr))[:600]
         eid = f"can:{_plegar(canon)}"
-        if eid in mapa.values():                        # colision de nombre: sufijo
+        if eid in ids_usados:                           # colision de nombre: sufijo
             eid = f"{eid}#{len(entradas)}"
+        ids_usados.add(eid)
         entradas.append({"id": eid, "nombre": canon, "alias": alias, "descripcion": desc,
                          "pasajes": sorted({f["pasaje"] for f in fs}),
                          "pasaje_propio": titulos[0]["pasaje"] if titulos else None,
-                         "n_menciones": len(fs)})
+                         "n_menciones": len(fs),
+                         "origenes": dict(origen_grupo.get(gid, {}))})
         for f in fs:
             mapa[f["clave"]] = eid
     print(f"  entradas canonicas: {len(entradas)} (de {len(fichas)} menciones; "
           f"{sum(1 for e in entradas if e['n_menciones'] > 1)} con >1 mencion)")
 
-    Fc = _embeber(client, [f"{e['nombre']} ({', '.join(e['alias'][:4])}) — {e['descripcion'][:300]}"
-                           for e in entradas])
-    np.savez_compressed(WIKI2_DIR / f"emb_fichas_{split}.npz",
-                        ids=np.array([e["id"] for e in entradas]), mat=Fc)
-    json.dump(entradas, open(WIKI2_DIR / f"entidades_{split}.json", "w", encoding="utf-8"),
+    json.dump(entradas, open(WIKI2_DIR / f"entidades_{split}{ver}.json", "w", encoding="utf-8"),
               ensure_ascii=False, indent=1)
-    json.dump(mapa, open(WIKI2_DIR / f"entidades_mapa_{split}.json", "w", encoding="utf-8"),
+    json.dump(mapa, open(WIKI2_DIR / f"entidades_mapa_{split}{ver}.json", "w", encoding="utf-8"),
               ensure_ascii=False)
-    print(f"OK entidades_{split}.json / entidades_mapa_{split}.json / emb_fichas_{split}.npz")
+    with open(WIKI2_DIR / f"entidades_uniones_{split}{ver}.jsonl", "w", encoding="utf-8") as f:
+        for i, j, o in uniones:
+            f.write(json.dumps({"a": fichas[i]["clave"], "b": fichas[j]["clave"], "origen": o},
+                               ensure_ascii=False) + "\n")
+    if not sin_embeddings:
+        Fc = _embeber(client, [f"{e['nombre']} ({', '.join(e['alias'][:4])}) — {e['descripcion'][:300]}"
+                               for e in entradas])
+        np.savez_compressed(WIKI2_DIR / f"emb_fichas_{split}{ver}.npz",
+                            ids=np.array([e["id"] for e in entradas]), mat=Fc)
+    print(f"OK entidades_{split}{ver}.json / entidades_mapa_{split}{ver}.json / "
+          f"entidades_uniones_{split}{ver}.jsonl"
+          f"{'' if sin_embeddings else f' / emb_fichas_{split}{ver}.npz'}")
 
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--split", choices=["sondeo", "benchmark"], required=True)
-    construir(ap.parse_args().split)
+    ap.add_argument("--split", required=True,
+                    help="benchmark, sondeo, hotpot_benchmark, hotpot_sondeo, musique_*")
+    ap.add_argument("--ver", default="", help="sufijo de version de los artefactos (p.ej. _v4)")
+    ap.add_argument("--legado", action="store_true", help="logica v3 (solo para procedencia)")
+    ap.add_argument("--sin-embeddings", action="store_true")
+    args = ap.parse_args()
+    construir(args.split, ver=args.ver, legado=args.legado, sin_embeddings=args.sin_embeddings)
 
 
 if __name__ == "__main__":

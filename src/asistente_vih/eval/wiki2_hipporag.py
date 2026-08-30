@@ -18,7 +18,7 @@ import json
 import sys
 
 from ..config import ROOT
-from .wiki2 import (WIKI2_DIR, cargar_benchmark, cargar_sondeo, evaluar,
+from .wiki2 import (WIKI2_DIR, cargar_split, evaluar,
                     imprimir, KS_DEFECTO)
 
 sys.path.insert(0, str(ROOT / "HippoRAG" / "src"))
@@ -30,10 +30,7 @@ MODELO_EMB = "text-embedding-3-small"
 def correr(split: str, humo: bool = False) -> None:
     from hipporag import HippoRAG
 
-    if split == "benchmark":
-        preguntas, corpus = cargar_benchmark()
-    else:
-        preguntas, corpus = cargar_sondeo()
+    preguntas, corpus = cargar_split(split)
     if humo:
         # mini-prueba: pasajes oro de las 3 primeras preguntas + relleno
         oros = {t for q in preguntas[:3] for t, _ in q["supporting_facts"]}
@@ -62,7 +59,8 @@ def correr(split: str, humo: bool = False) -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--split", choices=["benchmark", "sondeo"], default="benchmark")
+    ap.add_argument("--split", default="benchmark",
+                    help="benchmark, sondeo, hotpot_benchmark, hotpot_sondeo, musique_*")
     ap.add_argument("--humo", action="store_true", help="mini-prueba de fontaneria")
     args = ap.parse_args()
     correr(args.split, humo=args.humo)

@@ -1,0 +1,296 @@
+{
+ "split": "benchmark",
+ "ver": "",
+ "pares_oro": 2487,
+ "pares_oro_total": 3143,
+ "solo_cadena": true,
+ "vias": {
+  "alias": 2428,
+  "alias+oro": 9,
+  "sin": 45,
+  "ambiguo": 5
+ },
+ "mismo_nombre_distinto_qid": 7,
+ "unidades_resueltas": 2309,
+ "qids_distintos": 2295,
+ "entradas_tocadas": 2211,
+ "sobre_fusion": {
+  "n_entradas": 74,
+  "n_qids_implicados": 157
+ },
+ "infra_fusion": {
+  "n_qids": 6
+ },
+ "pares": {
+  "pares_misma_entrada": 97,
+  "pares_mismo_qid": 6,
+  "pares_correctos": 0,
+  "precision": 0.0,
+  "exhaustividad": 0.0,
+  "f1": 0.0
+ },
+ "atribucion": {
+  "origenes_en_caminos": {
+   "titulo_mencion": 77,
+   "juez_vecinos": 38,
+   "auto_casi": 20,
+   "auto_nombre": 23,
+   "titulo_sintetico": 8,
+   "titulo_sintetico_empate": 2
+  },
+  "origen_puente": {
+   "titulo_mencion": 40,
+   "juez_vecinos": 19,
+   "auto_nombre": 16,
+   "auto_casi": 18,
+   "titulo_sintetico": 2
+  },
+  "sin_camino": 2
+ },
+ "ejemplos_sobre": [
+  {
+   "entrada": "can:aleksander koniecpolski",
+   "qids": [
+    [
+     "Q4230777",
+     "Aleksander Koniecpolski"
+    ],
+    [
+     "Q722463",
+     "Stanisław Koniecpolski"
+    ]
+   ],
+   "origenes": {}
+  },
+  {
+   "entrada": "can:coulson wallop",
+   "qids": [
+    [
+     "Q5176173",
+     "Coulson Wallop"
+    ],
+    [
+     "Q6262835",
+     "John Wallop, 2nd Earl of Portsmouth"
+    ]
+   ],
+   "origenes": {}
+  },
+  {
+   "entrada": "can:leopoldo torres ríos",
+   "qids": [
+    [
+     "Q3229821",
+     "Leopoldo Torres Ríos"
+    ],
+    [
+     "Q716563",
+     "Leopoldo Torre Nilsson"
+    ]
+   ],
+   "origenes": {}
+  },
+  {
+   "entrada": "can:colgú mac faílbe flaind",
+   "qids": [
+    [
+     "Q2982542",
+     "Colgú mac Faílbe Flaind"
+    ],
+    [
+     "Q3067751",
+     "Faílbe Flann mac Áedo Duib"
+    ]
+   ],
+   "origenes": {}
+  },
+  {
+   "entrada": "can:prince achileas-andreas of greece and denmark",
+   "qids": [
+    [
+     "Q152099",
+     "Constantine I of Greece"
+    ],
+    [
+     "Q162177",
+     "Helen of Greece and Denmark"
+    ],
+    [
+     "Q165113",
+     "Grand Duchess Xenia Alexandrovna of Russia"
+    ],
+    [
+     "Q232732",
+     "Princess Maria of Greece and Denmark"
+    ]
+   ],
+   "origenes": {}
+  },
+  {
+   "entrada": "can:william ii of dampierre",
+   "qids": [
+    [
+     "Q1557512",
+     "Guy II of Dampierre"
+    ],
+    [
+     "Q2066259",
+     "William II of Dampierre"
+    ]
+   ],
+   "origenes": {}
+  },
+  {
+   "entrada": "can:george vii of imereti",
+   "qids": [
+    [
+     "Q2416424",
+     "Solomon II of Imereti"
+    ],
+    [
+     "Q2618516",
+     "George VII of Imereti"
+    ]
+   ],
+   "origenes": {}
+  },
+  {
+   "entrada": "can:lucius antonius albus",
+   "qids": [
+    [
+     "Q3655924",
+     "Lucius Antonius"
+    ],
+    [
+     "Q460160",
+     "Iullus Antonius"
+    ]
+   ],
+   "origenes": {}
+  },
+  {
+   "entrada": "can:saif ali khan",
+   "qids": [
+    [
+     "Q252290",
+     "Saif Ali Khan"
+    ],
+    [
+     "Q59513147",
+     "Sara Ali Khan"
+    ]
+   ],
+   "origenes": {}
+  },
+  {
+   "entrada": "can:humphrey stafford, 1st duke of buckingham",
+   "qids": [
+    [
+     "Q1265605",
+     "Humphrey Stafford, 1st Duke of Buckingham"
+    ],
+    [
+     "Q1637267",
+     "Humphrey Stafford"
+    ]
+   ],
+   "origenes": {}
+  },
+  {
+   "entrada": "can:john tyndall",
+   "qids": [
+    [
+     "Q18912661",
+     "Louisa Charlotte Tyndall"
+    ],
+    [
+     "Q360808",
+     "John Tyndall"
+    ]
+   ],
+   "origenes": {}
+  },
+  {
+   "entrada": "can:andrea von habsburg",
+   "qids": [
+    [
+     "Q76343",
+     "Otto von Habsburg"
+    ],
+    [
+     "Q78515",
+     "Karl von Habsburg"
+    ]
+   ],
+   "origenes": {}
+  }
+ ],
+ "ejemplos_infra": [
+  {
+   "qid": "Q51491",
+   "entradas": [
+    "can:michael curtiz",
+    "can:ralph nelson"
+   ],
+   "formas": [
+    "Michael Curtiz",
+    "Ralph Nelson"
+   ]
+  },
+  {
+   "qid": "Q16186861",
+   "entradas": [
+    "can:walfredo reyes jr.",
+    "can:zac dysert"
+   ],
+   "formas": [
+    "Walfredo Reyes Jr.",
+    "Zac Dysert"
+   ]
+  },
+  {
+   "qid": "Q60169300",
+   "entradas": [
+    "can:a texas steer",
+    "can:by the grace of god"
+   ],
+   "formas": [
+    "A Texas Steer",
+    "By the Grace of God (film)"
+   ]
+  },
+  {
+   "qid": "Q3794932",
+   "entradas": [
+    "can:the hideout inn",
+    "can:trieste mia!"
+   ],
+   "formas": [
+    "The Hideout (film)",
+    "Trieste mia!"
+   ]
+  },
+  {
+   "qid": "Q1559143",
+   "entradas": [
+    "can:michael curtiz",
+    "can:ralph nelson"
+   ],
+   "formas": [
+    "Michael Curtiz",
+    "Ralph Nelson"
+   ]
+  },
+  {
+   "qid": "Q8409",
+   "entradas": [
+    "can:alexander",
+    "can:alexander the great"
+   ],
+   "formas": [
+    "Alexander",
+    "Alexander the Great"
+   ]
+  }
+ ]
+}

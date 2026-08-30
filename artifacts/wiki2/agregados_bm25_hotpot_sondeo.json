@@ -1,0 +1,92 @@
+{
+ "nombre": "bm25_hotpot_sondeo",
+ "n": 200,
+ "por_tipo": {
+  "bridge": {
+   "n": 100,
+   "recall@2": 0.535,
+   "full_chain@2": 0.19,
+   "recall@5": 0.715,
+   "full_chain@5": 0.48,
+   "recall@10": 0.86,
+   "full_chain@10": 0.72,
+   "recall@20": 0.91,
+   "full_chain@20": 0.82
+  },
+  "comparison": {
+   "n": 100,
+   "recall@2": 0.625,
+   "full_chain@2": 0.36,
+   "recall@5": 0.83,
+   "full_chain@5": 0.69,
+   "recall@10": 0.97,
+   "full_chain@10": 0.94,
+   "recall@20": 1.0,
+   "full_chain@20": 1.0
+  }
+ },
+ "recall@2": 0.58,
+ "full_chain@2": 0.275,
+ "recall@2_ic": [
+  0.54,
+  0.6175
+ ],
+ "full_chain@2_ic": [
+  0.215,
+  0.335
+ ],
+ "recall@5": 0.7725,
+ "full_chain@5": 0.585,
+ "recall@5_ic": [
+  0.7325,
+  0.81
+ ],
+ "full_chain@5_ic": [
+  0.52,
+  0.65
+ ],
+ "recall@10": 0.915,
+ "full_chain@10": 0.83,
+ "recall@10_ic": [
+  0.89,
+  0.94
+ ],
+ "full_chain@10_ic": [
+  0.78,
+  0.88
+ ],
+ "recall@20": 0.955,
+ "full_chain@20": 0.91,
+ "recall@20_ic": [
+  0.9325,
+  0.9725
+ ],
+ "full_chain@20_ic": [
+  0.865,
+  0.945
+ ],
+ "por_salto": {
+  "A sin puente": {
+   "n": 100,
+   "recall@2": 0.625,
+   "full_chain@2": 0.36,
+   "recall@5": 0.83,
+   "full_chain@5": 0.69,
+   "recall@10": 0.97,
+   "full_chain@10": 0.94,
+   "recall@20": 1.0,
+   "full_chain@20": 1.0
+  },
+  "B puente simple": {
+   "n": 100,
+   "recall@2": 0.535,
+   "full_chain@2": 0.19,
+   "recall@5": 0.715,
+   "full_chain@5": 0.48,
+   "recall@10": 0.86,
+   "full_chain@10": 0.72,
+   "recall@20": 0.91,
+   "full_chain@20": 0.82
+  }
+ }
+}

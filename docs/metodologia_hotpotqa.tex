@@ -1,0 +1,730 @@
+% =========================================================================
+% Memoria: adaptación y evaluación en HotpotQA del sistema de recuperación
+% multisalto sobre grafo de aserciones reificadas con memoria canónica.
+% Compilar: tectonic metodologia_hotpotqa.tex   (o pdflatex, dos pasadas)
+% Complementa a metodologia_2wiki.tex (método completo y caso clínico).
+% =========================================================================
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish,es-noshorthands,es-tabla]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\sys}{\textsc{CatRAG-Reif}}
+\newcommand{\hippo}{HippoRAG~2}
+\newcommand{\gl}{\guillemotleft}
+\newcommand{\gr}{\guillemotright}
+\DeclareMathOperator*{\argmax}{arg\,max}
+\setlength{\parskip}{2pt}
+
+\title{Generalización sin ajuste de la recuperación multisalto sobre un grafo
+de aserciones reificadas con memoria canónica de entidades:\\
+adaptación del método y evaluación en HotpotQA}
+\author{}
+\date{30 de agosto de 2026}
+
+\begin{document}
+\maketitle
+\vspace{-2.5em}
+
+\begin{abstract}
+\noindent
+Un sistema de recuperación multisalto diseñado y calibrado sobre
+2WikiMultihopQA ---aserciones reificadas como nodos, memoria canónica de
+entidades derivada del corpus, paseo con reinicio personalizado y un analista
+de la pregunta que planifica la cadena--- se traslada a HotpotQA con la
+configuración \emph{congelada}: ni un dial, ni un umbral, ni una demostración
+cambiados. Para que el traslado sea honesto se retiran antes del flujo de
+consulta las tres reglas específicas de 2Wiki (enrutador léxico, salto de la
+selección de conjunto en comparación, recorte de menciones por mayúsculas
+como única vía de enlace), se cura la memoria canónica con decisiones
+registradas y auditables, y se generaliza el banco de pruebas a un esquema
+común. Sobre el subconjunto de reproducción de HotpotQA usado por \hippo{} y
+CatRAG ($1\,000$ preguntas de nivel \emph{hard}, corpus de $9\,811$ pasajes) y
+con los mismos modelos que esos trabajos (\texttt{gpt-4o-mini},
+\texttt{text-embedding-3-small}), la medición única del banco da
+$\mathrm{R@}5$ $94{,}7$ y cadena completa a $k{=}5$ ($\mathrm{FC@}5$)
+$90{,}2$, frente a $89{,}5$ / $80{,}4$ de CatRAG y $87{,}1$ / $75{,}5$ de
+\hippo{} publicados con idéntico equipamiento; pareado frente a BM25 sobre el
+mismo corpus, $+40{,}7$ puntos de $\mathrm{FC@}5$ (IC del $95\%$
+$[+37{,}1,+44{,}1]$). En el sondeo retenido, las ablaciones atribuyen la
+ganancia a las mismas piezas que en 2Wiki: el salto dirigido ($+2{,}0$ de
+$\mathrm{FC@}5$, significativo) y la selección de conjunto ($+4{,}0$ de
+$\mathrm{R@}2$). El análisis de fallos ---$98$ de $1\,000$, $96$ de puente, en
+$90$ de ellos falta un solo pasaje--- no muestra un patrón nuevo respecto a
+2Wiki. Se documentan el protocolo, los costes ($\approx 5$ USD en total) y
+las limitaciones: sin identificadores externos para auditar la memoria, sin
+reproducción propia de \hippo{} sobre este corpus, y una sola familia de
+modelos.
+\end{abstract}
+
+% =========================================================================
+\section{Introducción}
+\label{sec:intro}
+
+La pregunta que responde esta memoria es estrecha y verificable: un método
+de recuperación multisalto que rinde bien en el conjunto sobre el que se
+diseñó, ¿rinde también en otro conjunto \emph{sin tocarlo}? La tentación
+habitual ---reajustar diales, reescribir consignas, añadir reglas para el
+conjunto nuevo--- convierte cada resultado en una anécdota. Aquí se hace lo
+contrario: se fija la configuración, se escribe de antemano qué se espera
+(hipótesis H1 del documento de método) y se mide una sola vez.
+
+El sistema, descrito en detalle en la memoria de método sobre
+2WikiMultihopQA~\cite{wiki2} (en adelante, \emph{el documento de 2Wiki}),
+tiene tres ideas: (i) la unidad semántica del índice es la \emph{aserción
+reificada} ---un hecho promovido a nodo con su frase autocontenida y un rol
+por participante--- en lugar del triplete; (ii) las entidades se resuelven
+en indexación contra una \emph{memoria canónica} derivada del propio corpus
+(fichas por mención, dos canales de similitud, restricciones duras, juez y
+cierre transitivo), de modo que el grafo no necesita aristas de sinonimia y
+cada entidad tiene un \emph{pasaje propio}; (iii) en consulta, un
+\emph{analista} planifica la cadena de huecos, un paseo con reinicio
+personalizado ordena los pasajes y un \emph{salto dirigido} rellena los
+huecos que el primer paseo deja abiertos. Sobre 2Wiki, con
+\texttt{gpt-4o-mini}, esa configuración (v4) da $\mathrm{R@}5$ $98{,}1$ y
+$\mathrm{FC@}5$ $96{,}0$.
+
+HotpotQA~\cite{hotpotqa} es el contraste natural: preguntas escritas por
+personas y no generadas por plantillas, con menciones descriptivas y en
+minúsculas, dos tipos (puente y comparación) en lugar de cuatro, y sin los
+identificadores de Wikidata que en 2Wiki permitieron auditar la memoria
+canónica. Es además el conjunto en el que \hippo{}~\cite{hipporag2} y
+CatRAG~\cite{catrag} publican sus cifras con los mismos modelos que usamos,
+lo que hace posible una comparación directa sin reproducir nada.
+
+Las contribuciones de esta memoria son cuatro. Primera, el inventario
+explícito de lo que en la versión evaluada en 2Wiki era específico del
+conjunto y su sustitución por mecanismos generales
+(sección~\ref{sec:adaptacion}). Segunda, la curación auditada de la memoria
+canónica ---uniones con procedencia, juez para las uniones de título,
+homónimos con desambiguador--- validada en 2Wiki con el oro externo antes de
+aplicarla aquí (sección~\ref{sec:memoria}). Tercera, el protocolo de
+generalización con sondeo retenido, configuración congelada y medición
+única, y sus resultados (secciones~\ref{sec:protocolo}
+y~\ref{sec:resultados}). Cuarta, un análisis de fallos que sitúa el residuo
+y una discusión de validez que dice qué no se ha medido
+(secciones~\ref{sec:fallos} y~\ref{sec:validez}).
+
+% =========================================================================
+\section{HotpotQA y el banco de pruebas}
+\label{sec:datos}
+
+\paragraph{El conjunto.}
+HotpotQA~\cite{hotpotqa} contiene $113$k preguntas construidas por
+anotadores a partir de \emph{pares} de párrafos introductorios de Wikipedia.
+En las preguntas de \emph{puente} ($\approx 80\%$) el segundo párrafo solo
+se identifica a través de una entidad que el primero menciona (\gl{}What 2003
+Christmas-themed romantic comedy did Gregor Fisher have a role in?\gr{}: de
+la biografía de Fisher a \emph{Love Actually}); en las de \emph{comparación}
+se contrastan dos entidades nombradas (\gl{}Which rock band chose its name by
+drawing it out of a hat, Switchfoot or Midnight Oil?\gr{}). Cada pregunta
+trae, en el ajuste \emph{distractor}, diez párrafos ---los dos oro y ocho
+distractores recuperados por TF-IDF--- y las frases de apoyo
+(\texttt{supporting\_facts}) a nivel de frase; un campo \texttt{level}
+(\emph{easy}, \emph{medium}, \emph{hard}) gradúa la dificultad.
+
+\paragraph{El banco.}
+Seguimos el protocolo de \hippo{} y CatRAG: $1\,000$ preguntas del
+\emph{dev} (todas de nivel \emph{hard}; $811$ de puente, $189$ de
+comparación) y un corpus cerrado formado por la unión de sus contextos,
+$9\,811$ pasajes con título único. La recuperación es \emph{abierta} contra
+los $9\,811$, no contra los diez de cada pregunta; el oro son los dos títulos
+de \texttt{supporting\_facts}. El subconjunto está vendorizado con el código
+de \hippo{} y es el mismo que usa CatRAG, de modo que sus cifras publicadas
+con \texttt{gpt-4o-mini} + \texttt{text-embedding-3-small} son referencia
+directa (tabla~\ref{tab:banco}).
+
+\paragraph{Sondeo y calibración.}
+Las decisiones ---ninguna en este trabajo, pero el protocolo las prevé--- se
+toman sobre un \emph{sondeo} de $200$ preguntas del conjunto de
+entrenamiento (disjunto del banco), estratificado en $100$ de puente y $100$
+de comparación, restringido al nivel \emph{hard} para igualar la dificultad
+del banco, con su mini-corpus ($1\,990$ pasajes: unión de sus contextos). Las
+$15\,461$ preguntas \emph{hard} restantes del entrenamiento quedan como
+cantera de calibración. El conjunto de entrenamiento se obtuvo del espejo de
+HuggingFace en formato parquet (el servidor oficial no respondía) y se
+convirtió al esquema original.
+
+\paragraph{Métricas.}
+Para cada pregunta y $k\in\{2,5,10,20\}$: $\mathrm{recall@}k$, fracción de
+títulos oro entre los $k$ primeros, y $\mathrm{FC@}k$ (\emph{full-chain
+retrieval}), que vale $1$ solo si \emph{todos} los títulos oro están entre los
+$k$ primeros ---la métrica que exige la cadena completa y la que CatRAG
+llama FCR---. Los agregados llevan intervalos de confianza del $95\%$ por
+\emph{bootstrap} ($2\,000$ remuestreos) y las comparaciones entre sistemas
+sobre las mismas preguntas son \emph{pareadas}: diferencia media con su
+intervalo y recuento de preguntas ganadas y perdidas. Con dos oros por
+pregunta, $\mathrm{FC@}2$ es alcanzable en todos los tipos (a diferencia de
+la comparación-puente de 2Wiki).
+
+\paragraph{Diferencias con 2Wiki que importan al método.}
+La tabla~\ref{tab:diferencias} las resume. Tres pesan: las preguntas son más
+largas y libres (16 palabras de media frente a 12), con $35$ de las $1\,000$
+sin ninguna palabra en mayúscula tras la primera, lo que desarma cualquier
+recorte de menciones por capitalización; no existe la taxonomía de cuatro
+tipos, de modo que un enrutador léxico no tiene qué enrutar; y no hay
+identificadores externos, de modo que la precisión de fusión de la memoria
+canónica no puede medirse con oro.
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{Los dos bancos, tal como se usan aquí (subconjuntos de reproducción
+de \hippo{}).}
+\label{tab:diferencias}
+\begin{tabular}{p{0.20\textwidth}p{0.36\textwidth}p{0.36\textwidth}}
+\toprule
+ & 2WikiMultihopQA & HotpotQA\\
+\midrule
+origen & 2020; plantillas sobre tripletes de Wikidata & 2018; preguntas escritas por anotadores\\
+banco & $1\,000$ del \emph{dev}; corpus $6\,119$ & $1\,000$ del \emph{dev}, nivel \emph{hard}; corpus $9\,811$\\
+tipos & comparación 244, composicional 413, inferencia 108, comparación-puente 235 & puente 811, comparación 189\\
+pasajes oro & 2 (4 en comparación-puente) & 2\\
+oro adicional & tripletes de evidencia con QIDs de Wikidata & frases de apoyo; sin identificadores\\
+estilo & corto, regular, entidades en \emph{Title Case} & largo, descriptivo, minúsculas frecuentes\\
+sondeo & 200 ($50$ por tipo) del \emph{dev} restante; mini-corpus $1\,558$ & 200 ($100$ por tipo) del \emph{train}, \emph{hard}; mini-corpus $1\,990$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =========================================================================
+\section{Método: qué se conserva, qué se adapta}
+\label{sec:adaptacion}
+
+El sistema es el del documento de 2Wiki en su versión v4. Esta sección no lo
+repite: recuerda cada etapa en una frase y detalla solo lo que se cambió
+para que el traslado fuese posible sin ajuste. La regla que gobernó la
+adaptación es de \emph{generalidad}: se descarta todo mecanismo que dependa
+del idioma de las preguntas, de la forma de los títulos o de la taxonomía de
+tipos de un conjunto concreto, aunque en ese conjunto rindiese.
+
+\subsection{Indexación (sin cambios)}
+\label{sec:indexacion}
+
+\begin{enumerate}[leftmargin=1.6em, itemsep=1pt]
+\item \textbf{Extracción reificada.} Una llamada a \texttt{gpt-4o-mini} por
+  pasaje devuelve sus entidades y sus aserciones ---sujeto, relación, objeto,
+  calificadores y una frase autocontenida sin pronombres---. Consigna
+  idéntica a la de 2Wiki. En HotpotQA: $9\,811$ pasajes, $87\,629$
+  aserciones ($8{,}9$ por pasaje) y $74\,947$ menciones de entidad, sin un
+  solo error de formato.
+\item \textbf{Memoria canónica.} Una ficha por (pasaje, mención) con su
+  nombre y las frases en que participa; candidatos a la misma entidad por dos
+  canales (coseno de nombre, coseno de ficha) con restricciones duras
+  (fechas de nacimiento y muerte, ordinales); fusión automática por nombre
+  idéntico o casi idéntico con contexto afín, juez de lenguaje para la banda
+  ambigua, cierre transitivo. La versión v4 (sección~\ref{sec:memoria}) añade
+  procedencia y curación. En HotpotQA: $77\,589$ fichas (las $74\,947$
+  menciones más un título sintético por pasaje cuyo sujeto no fue extraído
+  con su forma de título) $\to$ $48\,856$ entradas, $9\,525$ de ellas con más
+  de una mención.
+\item \textbf{Grafo canónico.} Nodos pasaje, entidad canónica y aserción;
+  aristas aserción$\to$pasaje (procedencia), aserción$\to$entidad (rol de
+  sujeto, de objeto o de participante $n$-ario) y entidad$\to$pasaje
+  (mención). Sin aristas de sinonimia: las variantes ya colapsaron en la
+  memoria. En HotpotQA: $146\,274$ nodos ($9\,811$ + $48\,834$ + $87\,629$) y
+  $311\,979$ aristas. Con los roles invertidos para la consulta, el grafo es
+  \emph{por capas} ---entidad $\to$ aserción $\to$ pasaje--- y, como se
+  demostró en el documento de 2Wiki, el punto fijo del paseo tiene forma
+  cerrada: el paseo no encadena saltos; los encadena la siembra.
+\item \textbf{Almacenes vectoriales.} Una incrustación por aserción (su
+  frase), por entrada (nombre, alias y descripción), por pasaje (título y
+  texto) y, nueva en v4, por alias (el nombre solo, para el enlazador),
+  todas con \texttt{text-embedding-3-small}.
+\end{enumerate}
+
+\subsection{Consulta: las tres reglas retiradas y sus sustitutos}
+\label{sec:consulta}
+
+La consulta de la versión evaluada en 2Wiki tenía tres dependencias del
+conjunto. Se enumeran con lo que las sustituye.
+
+\paragraph{(R1) Enrutador léxico $\to$ una sola estrategia.}
+En 2Wiki, un clasificador por expresiones regulares asignaba cada pregunta a
+uno de los cuatro tipos y decidía si la selección final de conjunto se
+ejecutaba (no en comparación, donde la v3 ya saturaba). Nada de eso existe
+en HotpotQA. En v4 hay una sola estrategia para toda pregunta: analista,
+paseo, salto dirigido si hay huecos y selección de conjunto \emph{siempre}.
+El clasificador sobrevive únicamente como etiqueta para el desglose de
+2Wiki. La sección~\ref{sec:sondeo} mide el efecto de ejecutar el conjunto
+también en comparación: $+2$ puntos de $\mathrm{FC@}5$ en ese tipo.
+
+\paragraph{(R2) Recorte por mayúsculas $\to$ reconocimiento por el analista y enlazador de nombre a nombre.}
+El enlazador de menciones convertía la pregunta en tramos por capitalización
+y los casaba con los alias por igualdad tras plegado; un respaldo vectorial
+contra la ficha ($\cos \ge 0{,}80$) estaba, medido, inactivo (3 de 275
+tramos no exactos). En v4: (a) el \emph{analista} devuelve las menciones de
+la pregunta con su forma canónica, y esas formas se enlazan con el mismo
+enlazador ---es el reconocimiento de entidades que no depende de mayúsculas,
+L1---; (b) el escalón 2 pasa a comparar \emph{nombre con nombre}: coeficiente
+de Dice sobre trigramas de caracteres del alias plegado ($\ge 0{,}80$), que
+mide truncamientos y erratas y penaliza la palabra que falta (\gl{}bad
+education movie\gr{} no es \gl{}Bad Education\gr{}); el coseno de nombre
+($\ge 0{,}85$) solo admite candidatos cuando el léxico no admite a nadie
+(variantes sin superficie común); entre entradas a menos de $0{,}02$ de la
+mejor decide la ficha con descripción (L2); (c) el escalón exacto prueba
+primero la forma con el desambiguador entre paréntesis conservado (\gl{}X
+(1922 film)\gr{} ya no colisiona con \gl{}X (1923 film)\gr{}) y las
+colisiones de alias se resuelven por ficha y no por orden de carga (L4
+parcial); (d) el posesivo se retira solo al final del tramo (\gl{}Lothair
+II's mother\gr{}), porque dentro del tramo es parte del nombre (\gl{}God's
+Gift to Women\gr{}). Un parche de prefijos (reintentar el alias anteponiendo
+\gl{}the\gr{}) habría resuelto $168$ de los $275$ tramos fallidos de 2Wiki y
+se descartó por no generalizable.
+
+\paragraph{(R3) Candidatos del salto por subcadena $\to$ ancla explícita.}
+El salto dirigido tomaba como candidatos estructurales las aserciones del
+pasaje propio de la entidad enlazada cuyo nombre apareciese como subcadena
+del texto del hueco. En v4 el analista devuelve, por cada hueco sin cubrir,
+la \emph{entidad ancla} a la que el hueco se refiere (la película, la
+persona), y los candidatos estructurales son las aserciones del pasaje propio
+de esa ancla, enlazada por el diccionario; la subcadena queda como respaldo
+cuando el ancla no enlaza.
+
+\paragraph{Rondas de salto.}
+Para conjuntos con cadenas de tres y cuatro saltos (MuSiQue), el salto
+dirigido admite varias rondas: si tras un salto quedan huecos con comodín
+$[X]$, el analista re-planifica con los hechos descubiertos a la vista y se
+salta de nuevo, a lo sumo tres veces. En HotpotQA, de dos saltos, la
+segunda ronda casi nunca se activa; se incluye porque la configuración se
+congela para los tres conjuntos.
+
+\paragraph{Demostraciones del analista.}
+Las dos demostraciones de la consigna del analista se re-derivaron del
+conjunto de \emph{calibración} de 2Wiki (\gl{}Convoy Buddies / Tip Toes\gr{},
+\gl{}Zoolander 2\gr{}) en lugar de proceder del banco, lo que retira la
+reserva de contaminación de diseño que el documento de 2Wiki mantenía sobre
+el Plan A. Ninguna demostración procede de HotpotQA.
+
+\subsection{Lo que no se ajustó}
+\label{sec:congelado}
+
+Para que la afirmación \gl{}sin ajuste\gr{} sea comprobable, la lista
+completa de lo que HotpotQA heredó tal cual: los diales del paseo (peso de
+la presa densa $0{,}05$, amortiguación $0{,}5$, ancla débil $0{,}05$, ancla
+del enlazador $0{,}5$: los publicados por \hippo{}); los umbrales del
+enlazador ($0{,}80$ Dice, $0{,}85$ coseno de nombre, $0{,}02$ de empate) y de
+la memoria canónica ($0{,}75$ candidato, $0{,}92$ fusión automática de
+ficha, $0{,}80$ nombre, $15$ vecinos); los tamaños de candidatos (Top-40,
+frontera de $15$ por entidad con tope de $20$ nuevos, $16$ por hueco en el
+salto, top-12 en el conjunto); las tres consignas y sus demostraciones; el
+tope dinámico del analista ($\min(8,\max(2,|\text{plan}|))$); el modelo
+(\texttt{gpt-4o-mini}) y el codificador. Lo único distinto de un conjunto a
+otro son los datos.
+
+\subsection{Banco de pruebas generalizado}
+\label{sec:harness}
+
+El harness normaliza cada conjunto a un esquema común (identificador,
+pregunta, respuesta, tipo, títulos oro) y asigna un prefijo por conjunto a
+los \emph{splits} y a los artefactos (\texttt{hotpot\_benchmark},
+\texttt{hotpot\_sondeo}), de modo que extracción, memoria, grafo, recuperador
+y medición aceptan cualquier conjunto sin cambios de código. MuSiQue queda
+normalizado desde sus párrafos con marca de apoyo y su descomposición oro
+(el tipo es el número de saltos), a falta de resolver que sus títulos se
+repiten ($647$ de $11\,656$ pasajes), lo que exige definir el pasaje propio
+como conjunto.
+
+% =========================================================================
+\section{Curación auditada de la memoria canónica (v4)}
+\label{sec:memoria}
+
+La memoria canónica se cura \emph{antes} de indexar el conjunto nuevo,
+porque un índice nuevo heredaría los defectos de la consolidación. La
+curación se valida en 2Wiki, el único conjunto con oro externo, y se aplica
+sin cambios a HotpotQA.
+
+\paragraph{Auditoría con oro externo.}
+2Wiki trae en cada pregunta los identificadores Wikidata de las entidades de
+sus evidencias. Tomando como unidad el par (forma, QID) de las entidades de
+la cadena ---sujetos de evidencia y títulos oro; $2\,487$ pares, $2\,293$
+resueltos a una entrada---, una entrada con dos QIDs de formas distintas es
+una \emph{sobre-fusión} y un QID repartido en dos entradas una
+\emph{infra-fusión}; una misma forma bajo dos QIDs se excluye como ruido del
+oro. Registrando la \emph{procedencia} de cada unión (quién decidió que dos
+fichas son la misma entidad) se atribuye cada sobre-fusión al origen que
+tiende el puente entre los dos QIDs. En la versión v3 había $74$ entradas
+sobre-fundidas de $2\,211$ tocadas ($3{,}3\%$) y $6$ infra-fusiones; el
+origen puente más frecuente ($40$ de $74$) era la unión título$\to$sujeto
+ejecutada cuando el título ya era mención propia del pasaje: unía al sujeto
+con parientes, secuelas y homónimos.
+
+\paragraph{Cuatro decisiones registradas.}
+(i) La unión título$\to$sujeto solo es automática cuando el título es
+mención \emph{sintética} y el sujeto candidato es único; si el título ya es
+mención propia o hay empate, el par va al juez. (ii) La ficha-título sin
+fechas hereda las del sujeto único del artículo, lo que reactiva la
+restricción de fechas contra homónimos. (iii) Un nombre base idéntico o casi
+idéntico con desambiguador entre paréntesis distinto va al juez en lugar de
+fundirse. (iv) Cada entrada conserva el recuento de sus uniones por origen.
+En 2Wiki la sobre-fusión baja de $74$ a $32$ entradas con la infra-fusión
+intacta; el residuo son parientes con nombre casi igual que el propio juez
+acepta. El coste en 2Wiki fue de unos céntimos ($2\,325$ adjudicaciones
+nuevas); la curación cede dos preguntas del sondeo que la v3 acertaba por
+fusiones erróneas afortunadas (un futbolista etiquetado como director por el
+propio conjunto; un emperador fundido con su hijo) y se adopta igualmente,
+porque es el principio correcto y porque es la que necesitan los conjuntos
+sin identificadores.
+
+\paragraph{En HotpotQA.}
+La tabla~\ref{tab:indice} da las cifras de la consolidación. Sin QIDs no
+hay auditoría: la precisión de fusión solo podría estimarse con una muestra
+etiquetada a mano, que no se ha hecho (sección~\ref{sec:validez}). Lo que sí
+se observa es que la proporción de decisiones que el juez rechaza es
+parecida a la de 2Wiki (títulos-mención: $1\,975$ aceptadas de $2\,881$,
+$69\%$; empates: $447$ de $472$).
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{5pt}
+\caption{Índice de HotpotQA (banco y sondeo). Juez: pares enviados $\to$
+aceptados. Coste con \texttt{gpt-4o-mini} y \texttt{text-embedding-3-small}.}
+\label{tab:indice}
+\begin{tabular}{lrr}
+\toprule
+ & banco & sondeo\\
+\midrule
+pasajes & $9\,811$ & $1\,990$\\
+aserciones reificadas & $87\,629$ & $17\,025$\\
+menciones de entidad (fichas) & $77\,589$ & $14\,685$\\
+fichas-título con fechas heredadas & $1\,041$ & $196$\\
+fusiones automáticas (nombre idéntico / casi idéntico) & $102\,592$ / $658$ & $10\,685$ / $167$\\
+título$\to$sujeto sintético (directas) & $2\,017$ & $387$\\
+juez: vecinos & $22\,635 \to 6\,664$ & $2\,742 \to 811$\\
+juez: título ya mención & $2\,881 \to 1\,975$ & $588 \to 391$\\
+juez: empate de sujeto & $472 \to 447$ & $102 \to 98$\\
+entradas canónicas & $48\,856$ & $10\,335$\\
+grafo: nodos / aristas & $146\,274$ / $311\,979$ & $29\,345$ / $60\,176$\\
+coste: extracción / juez / incrustaciones & $3{,}9$ / $0{,}4$ / $0{,}4$ USD & $0{,}8$ / $0{,}1$ / $0{,}1$ USD\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =========================================================================
+\section{Protocolo}
+\label{sec:protocolo}
+
+\begin{enumerate}[leftmargin=1.6em, itemsep=1pt]
+\item \textbf{Hipótesis pre-registrada} (H1 del documento de 2Wiki): en
+  HotpotQA, la versión v3 supera la cadena completa publicada de CatRAG
+  ($80{,}4$) con los mismos modelos, porque el segmento de puente equivale
+  al composicional de 2Wiki. Se contrasta con la v4, que la contiene.
+\item \textbf{Configuración congelada} (sección~\ref{sec:congelado}) y
+  \textbf{modelos de paridad}: \texttt{gpt-4o-mini} en extracción, juez,
+  analista, salto y conjunto; \texttt{text-embedding-3-small} en toda
+  incrustación. Son los modelos con los que CatRAG publica su tabla.
+\item \textbf{Sondeo} de $200$ para comprobar que nada se rompe y para las
+  ablaciones; \textbf{medición única} del banco; sin segunda pasada.
+\item \textbf{Suelo} propio: BM25 sobre el mismo corpus (implementación
+  independiente de la de CatRAG, por lo que las dos cifras de BM25 no son
+  comparables entre sí; sí lo son con sus respectivos sistemas).
+\item \textbf{Comparación}: pareada frente a BM25 (mismas preguntas); frente
+  a \hippo{} y CatRAG, por las cifras publicadas con los mismos modelos, sin
+  intervalo (no se reprodujo \hippo{} sobre este corpus).
+\item \textbf{Trazabilidad}: cada llamada al modelo se guarda en una caché
+  SQLite por (modelo, resumen del mensaje); toda medición es reproducible a
+  coste cero y cada paso de la sesión queda en una bitácora con hora,
+  comando, coste y resultado.
+\end{enumerate}
+
+% =========================================================================
+\section{Resultados}
+\label{sec:resultados}
+
+\subsection{Sondeo y ablaciones}
+\label{sec:sondeo}
+
+La tabla~\ref{tab:sondeo} da el sondeo. El sistema completo alcanza
+$\mathrm{R@}5$ $98{,}8$ y $\mathrm{FC@}5$ $97{,}5$ (puente $95{,}0$,
+comparación $100$) frente a $77{,}2$ / $58{,}5$ de BM25; unas $3$ llamadas
+por pregunta. Dos ablaciones reparten la contribución. Sin salto dirigido,
+$\mathrm{FC@}5$ cae a $95{,}5$ (puente $91{,}0$): pareado, $+2{,}0$
+$[+0{,}5,+4{,}0]$ para el sistema completo, que gana $4$ preguntas y no
+pierde ninguna; también $\mathrm{R@}2$ ($+2{,}2$, significativo) y
+$\mathrm{R@}5$ ($+1{,}0$, significativo). Sin selección de conjunto,
+$\mathrm{R@}2$ cae de $87{,}0$ a $83{,}0$ ($+4{,}0$ $[+1{,}5,+6{,}8]$,
+significativo: el conjunto ordena temprano), $\mathrm{FC@}5$ de $97{,}5$ a
+$96{,}5$ (n.s.) y, en comparación, de $100$ a $98{,}0$: es la evidencia de
+que ejecutar el conjunto también en comparación (R1) no era neutro.
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{Sondeo de HotpotQA ($200$; \texttt{gpt-4o-mini}). Pareado: diferencia
+sistema completo $-$ ablación (IC del $95\%$; gana / pierde).}
+\label{tab:sondeo}
+\begin{tabular}{lcccccl}
+\toprule
+sistema & $\mathrm{R@}2$ & $\mathrm{R@}5$ & $\mathrm{FC@}2$ & $\mathrm{FC@}5$ & $\mathrm{FC@}10$ & $\mathrm{FC@}5$ puente / comparación\\
+\midrule
+BM25 (suelo) & $58{,}0$ & $77{,}2$ & $27{,}5$ & $58{,}5$ & $83{,}0$ & $48{,}0$ / $69{,}0$\\
+\sys{} v4 completo & $\mathbf{87{,}0}$ & $\mathbf{98{,}8}$ & $\mathbf{75{,}5}$ & $\mathbf{97{,}5}$ & $98{,}0$ & $95{,}0$ / $100$\\
+\quad sin salto dirigido & $84{,}8$ & $97{,}8$ & $71{,}5$ & $95{,}5$ & $97{,}0$ & $91{,}0$ / $100$\\
+\quad sin selección de conjunto & $83{,}0$ & $98{,}2$ & $68{,}0$ & $96{,}5$ & $98{,}5$ & $95{,}0$ / $98{,}0$\\
+\midrule
+\multicolumn{7}{l}{pareado completo $-$ sin salto: $\mathrm{FC@}5$ $+2{,}0$ $[+0{,}5,+4{,}0]$ (4/0); $\mathrm{R@}2$ $+2{,}2$ $[+0{,}2,+4{,}5]$; $\mathrm{R@}5$ $+1{,}0$ $[+0{,}2,+2{,}0]$}\\
+\multicolumn{7}{l}{pareado completo $-$ sin conjunto: $\mathrm{R@}2$ $+4{,}0$ $[+1{,}5,+6{,}8]$ (17/4); $\mathrm{FC@}5$ $+1{,}0$ $[-1{,}0,+3{,}0]$ n.s.\ (3/1)}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Banco}
+\label{sec:banco}
+
+La tabla~\ref{tab:banco} sitúa la medición única del banco junto a las
+referencias publicadas con los mismos modelos. \sys{} v4 obtiene
+$\mathrm{R@}2$ $77{,}1$, $\mathrm{R@}5$ $94{,}7$ $[93{,}6,95{,}8]$,
+$\mathrm{FC@}5$ $90{,}2$ $[88{,}2,92{,}0]$ y $\mathrm{FC@}10$ $93{,}6$; por
+tipo, puente $93{,}6$ / $88{,}2$ y comparación $99{,}5$ / $98{,}9$
+($\mathrm{R@}5$ / $\mathrm{FC@}5$). Frente a CatRAG, $+5{,}2$ de
+$\mathrm{R@}5$ y $+9{,}8$ de cadena completa; frente a \hippo{}, $+7{,}6$ y
+$+14{,}7$; frente al mejor codificador denso del mismo tamaño, $+13{,}4$ y
+$+25{,}3$. Solo \hippo{} con NV-Embed-v2 (siete mil millones de parámetros,
+GPU) publica un $\mathrm{R@}5$ mayor ($96{,}3$), sin cadena completa
+informada. Pareado frente a nuestro BM25 sobre el mismo corpus: $\mathrm{FC@}5$
+$+40{,}7$ $[+37{,}1,+44{,}1]$ (gana $432$, pierde $25$), puente $+42{,}8$,
+comparación $+31{,}7$; $\mathrm{R@}5$ $+21{,}9$ $[+20{,}0,+23{,}8]$. La
+hipótesis H1 se confirma con margen: pedía superar $80{,}4$ y la v4 lo
+supera en diez puntos. El coste de la medición fue de $2\,982$ llamadas
+($\approx 3$ por pregunta, $\approx 1$ USD, $62$ minutos).
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{5pt}
+\caption{Banco de HotpotQA ($1\,000$ preguntas, corpus $9\,811$). Referencias
+de~\cite{catrag} (su tabla con \texttt{gpt-4o-mini} +
+\texttt{text-embedding-3-small}; FCR $=\mathrm{FC@}5$; F1 con lector
+Llama-3.3-70B, no medido aquí). Última fila de referencia: \hippo{} con
+NV-Embed-v2 de~\cite{hipporag2}.}
+\label{tab:banco}
+\begin{tabular}{lcccl}
+\toprule
+sistema & $\mathrm{R@}2$ & $\mathrm{R@}5$ & $\mathrm{FC@}5$ & nota\\
+\midrule
+BM25 (CatRAG) & --- & $64{,}8$ & $38{,}3$ & F1 $54{,}1$\\
+Contriever~\cite{contriever} & --- & $75{,}3$ & $54{,}1$ & \\
+GTR~\cite{gtr} & --- & $73{,}9$ & $53{,}0$ & \\
+denso \texttt{text-embedding-3-small} & --- & $81{,}3$ & $64{,}9$ & \\
+RAPTOR~\cite{raptor} & --- & $79{,}5$ & $61{,}4$ & \\
+\hippo{}~\cite{hipporag2} & --- & $87{,}1$ & $75{,}5$ & F1 $69{,}4$\\
+CatRAG~\cite{catrag} & --- & $89{,}5$ & $80{,}4$ & F1 $71{,}4$\\
+\midrule
+BM25 (nuestra implementación, mismo corpus) & $56{,}1$ & $72{,}8$ & $49{,}5$ & suelo del pareado\\
+\textbf{\sys{} v4 (este trabajo)} & $\mathbf{77{,}1}$ & $\mathbf{94{,}7}$ & $\mathbf{90{,}2}$ & $\mathrm{FC@}10$ $93{,}6$; puente $88{,}2$, comparación $98{,}9$\\
+\midrule
+\hippo{} con NV-Embed-v2 (7B) & --- & $96{,}3$ & --- & techo de hardware\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Del sondeo al banco, y de 2Wiki a HotpotQA}
+\label{sec:comparacion}
+
+La caída del sondeo al banco ($\mathrm{FC@}5$ $97{,}5 \to 90{,}2$) es la del
+corpus cinco veces mayor: más distractores con títulos parecidos, más
+homónimos, más hechos afines por coseno. Con la misma configuración y el
+mismo modelo, 2Wiki da $98{,}1$ / $96{,}0$ y HotpotQA $94{,}7$ / $90{,}2$. La
+diferencia es coherente con la naturaleza de los conjuntos: las preguntas
+de 2Wiki nombran sus entidades con la forma del título y encadenan
+relaciones de una lista corta (director, madre, fecha), de modo que el
+enlazador ancla casi siempre y el analista reconoce el patrón; las de
+HotpotQA describen (\gl{}the radio station that serves the area comprising
+all of Belknap County\gr{}), nombran en minúsculas y exigen a veces un puente
+que el propio pasaje oro solo insinúa. Aun así, el segmento de puente de
+HotpotQA ($88{,}2$) queda en la banda del composicional de 2Wiki ($95{,}9$)
+más que en la de \hippo{} en ese mismo conjunto ($75{,}5$), que era lo que H1
+predecía.
+
+% =========================================================================
+\section{Análisis de fallos}
+\label{sec:fallos}
+
+De las $1\,000$ preguntas, $98$ no consiguen la cadena completa a $k{=}5$:
+$96$ de puente y $2$ de comparación. En $90$ de ellas falta \emph{un solo}
+pasaje ---el puente---, que queda en los puestos 6--10 en $37$ casos, en
+11--20 en $23$ y fuera del top-20 en $46$; en $8$ faltan los dos. Las $35$
+preguntas sin ninguna mayúscula interior fallan algo más ($6$, un $17\%$,
+frente al $9{,}8\%$ global): el recorte por capitalización, que en v4 solo
+alimenta la frontera del analista, todavía pesa, y la vía es que el
+reconocimiento de entidades del analista preceda también a la frontera (L1
+completo).
+
+Los fallos leídos uno a uno en el sondeo no muestran un patrón nuevo:
+oro secundario que el pasaje principal apenas conecta (\gl{}V8 engine\gr{} $\to$
+\gl{}Chevrolet Camaro (first generation)\gr{}, en el puesto 19), homónimos de
+serie (\gl{}ABU TV Song Festival 2014\gr{} entre las ediciones de 2012, 2013 y
+2016), puentes descritos sin nombre (\gl{}the man who called Log College's
+structure very plain in his journal\gr{} $\to$ George Whitefield, ausente) o
+un mascota cuya especie no aparece en el pasaje de la universidad
+(\gl{}Scrappy Moc\gr{} $\to$ \gl{}Northern mockingbird\gr{}). Son los mismos
+tres mecanismos de fallo que el documento de 2Wiki cataloga ---el filtro no
+selecciona el puente aunque lo ve, el enlazador no ancla, el hecho puente no
+está verbalizado en el pasaje--- con la proporción desplazada hacia el
+tercero, propio de un conjunto donde el puente lo escribió una persona y no
+una plantilla.
+
+% =========================================================================
+\section{Discusión}
+\label{sec:discusion}
+
+\paragraph{Por qué generaliza.}
+Tres decisiones de diseño explican que el sistema no necesitara ajuste. La
+\emph{memoria canónica} convierte la variación de superficie ---el problema
+que en HotpotQA se agrava con las menciones descriptivas--- en un problema
+de indexación resuelto una vez, y da a cada entidad un pasaje propio al que
+la siembra puede depositar masa directamente. El \emph{analista} sustituye
+al enrutador y al filtro: no clasifica la pregunta, la \emph{planifica}, y
+un plan de huecos con anclas es el mismo objeto en cualquier conjunto. Y el
+\emph{salto dirigido} es la única pieza que encadena de verdad, porque el
+grafo por capas no lo hace; su contribución, significativa en los dos
+sondeos, es la que separa a este sistema de los paseos con reinicio sobre
+grafos de entidades.
+
+\paragraph{Qué costó.}
+Indexar HotpotQA costó $\approx 4{,}7$ USD (extracción $3{,}9$, juez $0{,}4$,
+incrustaciones $0{,}4$) y unas dos horas de reloj con ocho hilos; consultar,
+$\approx 0{,}001$ USD por pregunta con \texttt{gpt-4o-mini}. La memoria
+canónica es la pieza más cara en tiempo (producto de $77\,589 \times 77\,589$
+cosenos por bloques y $3\,240$ llamadas al juez), y la que más se
+beneficiaría de los candidatos por umbral sobre grupos de nombre plegado
+que el documento de 2Wiki propone (E5).
+
+\paragraph{Qué se aprendió de la curación.}
+La auditoría con oro externo enseñó que una parte de las fusiones erróneas
+\emph{ayudaba} en 2Wiki: fundir a un emperador con su hijo hace alcanzable
+el pasaje del hijo desde el del padre, que es justo lo que pide una pregunta
+de parentesco. Es una ganancia por accidente, no por diseño, y no se puede
+esperar de un conjunto sin esa estructura familiar; renunciar a ella para
+tener una memoria precisa y auditable es la decisión correcta, y HotpotQA
+es el primer conjunto que la valida.
+
+% =========================================================================
+\section{Consideraciones de validez y limitaciones}
+\label{sec:validez}
+
+\begin{enumerate}[leftmargin=1.6em, itemsep=1pt]
+\item \textbf{Sin reproducción propia de \hippo{} ni de CatRAG sobre este
+  corpus.} La comparación con ellos es por cifras publicadas con los mismos
+  modelos ---en 2Wiki, nuestra reproducción de \hippo{} coincidió al decimal
+  con la del artículo de CatRAG, lo que da confianza en el protocolo---,
+  pero sin intervalo pareado. Reproducir \hippo{} sobre HotpotQA cuesta
+  unos $5$ USD y queda pendiente.
+\item \textbf{Sin auditoría de la memoria canónica.} HotpotQA no trae
+  identificadores externos; la precisión de fusión de las $48\,856$ entradas
+  no está medida. La curación se validó en 2Wiki; su efecto aquí se infiere.
+\item \textbf{Un solo modelo y una sola medición.} La fila de paridad
+  (\texttt{gpt-4o-mini}) es la única del banco; en 2Wiki, el modelo adoptado
+  en producción (\texttt{deepseek-chat}) rinde un punto más y su medición en
+  HotpotQA está pendiente. La medición única evita el ajuste al banco pero
+  no informa de la varianza entre ejecuciones (en 2Wiki, dos ejecuciones
+  del mismo sistema difirieron en dos preguntas de mil).
+\item \textbf{Oro a nivel de título.} Las frases de apoyo no se usan; un
+  pasaje oro recuperado por una frase que no es la de apoyo cuenta como
+  acierto. Es el protocolo de \hippo{} y CatRAG, y por eso se conserva.
+\item \textbf{Solo nivel \emph{hard}.} El subconjunto de reproducción es
+  íntegramente \emph{hard}; nada se dice de los niveles \emph{easy} y
+  \emph{medium}.
+\item \textbf{Sin respuesta.} Se mide recuperación, no la respuesta final
+  (F1, tasa de éxito conjunto); la columna F1 de la tabla~\ref{tab:banco}
+  queda vacía hasta que se añada el lector.
+\item \textbf{Independencia de las decisiones.} Todas las decisiones de v4 se
+  tomaron sobre el sondeo de 2Wiki y su conjunto de calibración; ninguna
+  sobre datos de HotpotQA. Las ablaciones de la sección~\ref{sec:sondeo} se
+  midieron \emph{después} de fijar la configuración y no la modificaron.
+\end{enumerate}
+
+% =========================================================================
+\section{Trabajo futuro}
+\label{sec:futuro}
+
+En orden de valor: (1) la medición de los dos bancos con el modelo adoptado
+(\texttt{deepseek-chat}) y la reproducción de \hippo{} sobre HotpotQA para
+completar los pareados; (2) MuSiQue, que trae cadenas de tres y cuatro
+saltos con su descomposición oro y exige antes el pasaje propio como
+conjunto de pasajes con el mismo título; allí se contrastan H2 (la ventaja
+se concentra en tres y cuatro saltos y depende de las rondas de salto) y H3
+(la calidad del plan del analista, medida contra la descomposición oro,
+predice la cadena completa mejor que la afinidad de la pregunta); (3) el
+lector y las métricas de respuesta, para comparar con los F1 y JSR
+publicados; (4) L1 completo ---reconocimiento de entidades antes de la
+frontera--- motivado por las preguntas en minúsculas; (5) los candidatos por
+umbral en la memoria canónica, para abaratar la indexación de corpus
+mayores.
+
+% =========================================================================
+\section*{Reproducibilidad}
+
+Código en la rama \texttt{eval-wiki2} del repositorio (módulos
+\texttt{eval/wiki2.py}, \texttt{ingest/wiki2\_openie.py},
+\texttt{ingest/wiki2\_entidades.py}, \texttt{ingest/wiki2\_grafo.py},
+\texttt{retrieval/wiki2\_catrag.py}, \texttt{retrieval/wiki2\_plan.py},
+\texttt{eval/wiki2\_correr.py}); artefactos con sufijo \texttt{\_v4} en
+\texttt{artifacts/wiki2/}; resultados por pregunta en
+\texttt{resultados\_plan\_v4\_4omini\_hotpot\_benchmark.jsonl} y agregados y
+pareados junto a ellos; bitácora de la sesión en
+\texttt{BITACORA\_2026-08-30.md}; cuaderno de trazas en
+\texttt{notebooks/recuperacion\_hotpotqa.ipynb}. Comandos:
+\texttt{wiki2 --generar-splits --dataset hotpot --n-por-tipo 100};
+\texttt{wiki2\_openie --split hotpot\_benchmark};
+\texttt{wiki2\_entidades --split hotpot\_benchmark --ver \_v4};
+\texttt{wiki2\_grafo --split hotpot\_benchmark --canonico --ver \_v4};
+\texttt{wiki2\_correr --split hotpot\_benchmark --modelo gpt-4o-mini --pareado bm25\_hotpot\_benchmark}.
+
+% =========================================================================
+\begin{thebibliography}{99}\small
+
+\bibitem{hotpotqa} Z.~Yang, P.~Qi, S.~Zhang, Y.~Bengio, W.~W.~Cohen,
+R.~Salakhutdinov, C.\,D.~Manning. HotpotQA: A dataset for diverse,
+explainable multi-hop question answering. \emph{EMNLP}, 2018.
+
+\bibitem{wiki2} X.~Ho, A.-K.~Duong Nguyen, S.~Sugawara, A.~Aizawa.
+Constructing a multi-hop QA dataset for comprehensive evaluation of
+reasoning steps. \emph{COLING}, 2020.
+
+\bibitem{musique} H.~Trivedi, N.~Balasubramanian, T.~Khot, A.~Sabharwal.
+MuSiQue: Multihop questions via single-hop question composition.
+\emph{TACL}, 2022.
+
+\bibitem{hipporag} B.~Jiménez Gutiérrez, Y.~Shu, Y.~Gu, M.~Yasunaga,
+Y.~Su. HippoRAG: Neurobiologically inspired long-term memory for large
+language models. \emph{NeurIPS}, 2024.
+
+\bibitem{hipporag2} B.~Jiménez Gutiérrez, Y.~Shu, W.~Qi, S.~Zhou, Y.~Su.
+From RAG to memory: Non-parametric continual learning for large language
+models. 2025. arXiv:2502.14802.
+
+\bibitem{catrag} K.\,H.~Lau, F.~Zhang, B.~Ruan, Y.~Zhou, Q.~Guo,
+R.~Zhang, X.~Zhou. Breaking the static graph: Context-aware traversal for
+graph-based RAG. \emph{Findings of ACL}, págs.~5849--5863, 2026.
+
+\bibitem{raptor} P.~Sarthi, S.~Abdullah, A.~Tuli, S.~Khanna, A.~Goldie,
+C.\,D.~Manning. RAPTOR: Recursive abstractive processing for
+tree-organized retrieval. \emph{ICLR}, 2024.
+
+\bibitem{contriever} G.~Izacard, M.~Caron, L.~Hosseini, S.~Riedel,
+P.~Bojanowski, A.~Joulin, E.~Grave. Unsupervised dense information
+retrieval with contrastive learning. \emph{TMLR}, 2022.
+
+\bibitem{gtr} J.~Ni, C.~Qu, J.~Lu, Z.~Dai, G.~Hernández Ábrego, J.~Ma,
+V.~Zhao, Y.~Luan, K.~Hall, M.-W.~Chang, Y.~Yang. Large dual encoders are
+generalizable retrievers. \emph{EMNLP}, 2022.
+
+\bibitem{nvembed} C.~Lee, R.~Roy, M.~Xu, J.~Raiman, M.~Shoeybi,
+B.~Catanzaro, W.~Ping. NV-Embed: Improved techniques for training LLMs as
+generalist embedding models. \emph{ICLR}, 2025.
+
+\bibitem{bm25} S.~Robertson, H.~Zaragoza. The probabilistic relevance
+framework: BM25 and beyond. \emph{Foundations and Trends in Information
+Retrieval}, 3(4):333--389, 2009.
+
+\bibitem{pprsurvey} M.~Yang, H.~Wang, Z.~Wei, S.~Wang, J.-R.~Wen.
+Efficient algorithms for personalized PageRank computation: A survey.
+\emph{IEEE TKDE}, 2024.
+
+\end{thebibliography}
+
+\end{document}

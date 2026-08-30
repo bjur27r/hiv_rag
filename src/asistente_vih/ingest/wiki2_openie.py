@@ -111,11 +111,8 @@ def _extraer_uno(client: OpenAI, con: sqlite3.Connection, lock: threading.Lock,
 
 
 def extraer(split: str, muestra: int | None = None) -> None:
-    if split == "sondeo":
-        corpus = json.loads((WIKI2_DIR / "sondeo_corpus.json").read_text(encoding="utf-8"))
-    else:
-        from ..eval.wiki2 import CORPUS_PATH
-        corpus = json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
+    from ..eval.wiki2 import ruta_corpus
+    corpus = json.loads(ruta_corpus(split).read_text(encoding="utf-8"))
     if muestra:
         corpus = corpus[:muestra]
     client, con, lock = OpenAI(), _abrir_cache(), threading.Lock()
@@ -210,7 +207,7 @@ def cobertura_sondeo() -> None:
 
 def main() -> None:
     ap = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    ap.add_argument("--split", choices=["sondeo", "benchmark"])
+    ap.add_argument("--split", help="benchmark, sondeo, hotpot_benchmark, hotpot_sondeo, musique_*")
     ap.add_argument("--muestra", type=int, help="solo los N primeros pasajes")
     ap.add_argument("--cobertura", action="store_true",
                     help="diagnostico de cobertura vs triples oro del sondeo")

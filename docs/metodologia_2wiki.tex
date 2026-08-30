@@ -89,31 +89,25 @@ lógicas (pseudo-consultas generadas por un modelo de lenguaje) y recorre el
 grafo con un bucle recuperar--razonar--podar, a coste de múltiples llamadas
 por consulta.
 
-\paragraph{La línea HippoRAG.}
+\paragraph{La línea HippoRAG y CatRAG.}
 HippoRAG~\cite{hipporag} y HippoRAG~2~\cite{hipporag2}, inspirados en la
 teoría de la indexación hipocampal de la memoria, construyen un grafo de
 entidades y pasajes mediante extracción abierta y recuperan con PageRank
 personalizado (PPR)~\cite{pprsurvey}: la pregunta se ancla en unos nodos
 semilla y un paseo aleatorio con reinicio difunde relevancia por el grafo.
 HippoRAG~2 añade la puntuación consulta--triplete, un filtro de
-\emph{memoria de reconocimiento} (un modelo de lenguaje selecciona los
-tripletes útiles entre los más afines) y la fusión con recuperación densa,
-alcanzando el estado del arte en 2Wiki ($90{,}4$ de exhaustividad a 5 con
+\emph{memoria de reconocimiento} y la fusión con recuperación densa, y
+alcanza el estado del arte en 2Wiki ($90{,}4$ de exhaustividad a 5 con
 NV-Embed-v2). PropRAG~\cite{proprag} sustituye los tripletes por
-proposiciones y busca caminos con búsqueda en haz.
-
-\paragraph{Del grafo estático al recorrido adaptado a la consulta.}
-CatRAG~\cite{catrag} diagnostica en esta línea la \guillemotleft{}falacia del grafo
-estático\guillemotright{}: las probabilidades de transición se fijan en indexación, de
-modo que aristas genéricas y nodos concentradores (\emph{hubs}) desvían el
-paseo antes de alcanzar la evidencia del segundo salto; la exhaustividad
-parcial se mantiene alta mientras la cadena completa se rompe. Su
-respuesta son tres mecanismos de consulta ---anclas simbólicas débiles,
-reponderación dinámica de aristas juzgada por un modelo de lenguaje y
-refuerzo de los pasajes con evidencia verificada--- sobre el grafo de
-HippoRAG~2, que dejan la cadena completa en 2Wiki en $67{,}6\%$
-(tabla~\ref{tab:sota}): una mejora real, pero acotada, porque el grafo
-subyacente sigue siendo plano y sus entidades siguen fragmentadas.
+proposiciones y busca caminos con búsqueda en haz. CatRAG~\cite{catrag}
+diagnostica en esta línea la \guillemotleft{}falacia del grafo estático\guillemotright{}
+---las probabilidades de transición se fijan en indexación--- y la ataca
+con tres mecanismos de consulta sobre el grafo de HippoRAG~2, que dejan
+la cadena completa en 2Wiki en $67{,}6\%$ (tabla~\ref{tab:sota}). Por
+ser la genealogía directa de este trabajo, la sección~\ref{sec:palancas}
+describe los tres sistemas con detalle conceptual y funcional, y muestra
+sobre el corpus de evaluación por qué la mejora de CatRAG es real pero
+acotada.
 
 \paragraph{Grafos como memoria de agentes.}
 En paralelo, los sistemas de memoria para agentes conversacionales
@@ -125,6 +119,248 @@ que se acumulan hechos con procedencia. Nuestra \emph{memoria canónica de
 entidades} (sección~\ref{sec:diccionario}) es esa pieza, construida de una
 vez sobre un corpus cerrado.
 
+\subsection{De HippoRAG a CatRAG: las dos palancas del paseo con reinicio}
+\label{sec:palancas}
+
+La línea que va de HippoRAG a CatRAG es la genealogía directa de este
+trabajo, y conviene describirla con más detalle del habitual en un estado
+del arte, porque las aportaciones de la sección~\ref{sec:metodos} se
+entienden como respuesta a lo que esa evolución deja abierto. El hilo
+conductor es una distinción sencilla que los tres sistemas comparten y
+que cada uno explota de forma distinta.
+
+\paragraph{Las dos palancas.}
+Un paseo aleatorio con reinicio personalizado sobre un grafo calcula el
+punto fijo
+\begin{equation}
+\mathbf{p} \;=\; \lambda\,P^{\!\top}\mathbf{p} \;+\; (1-\lambda)\,\mathbf{v},
+\qquad\text{es decir}\qquad
+\mathbf{p}^{*} \;=\; (1-\lambda)\sum_{\ell\ge 0}\lambda^{\ell}\,(P^{\!\top})^{\ell}\,\mathbf{v},
+\label{eq:neumann}
+\end{equation}
+donde $\mathbf{v}$ es el \emph{vector de reinicio} ---dónde nace la masa y
+adónde vuelve en cada reinicio, con probabilidad $1-\lambda$ por paso--- y
+$P$ la \emph{matriz de transición} ---adónde va la masa cuando sale de un
+nodo, $P(u\to w)=w_{uw}/\sum_{w'}w_{uw'}$---. La serie de la derecha hace
+visible el papel de cada objeto: $\mathbf{v}$ es la \emph{fuente} de toda
+la masa, y $P$ el \emph{coeficiente} que la propaga a distancia $\ell$ con
+peso $\lambda^{\ell}$. Todo mecanismo de consulta de un recuperador basado
+en PPR toca una de las dos palancas ---la fuente o el coeficiente--- y la
+diferencia no es cosmética: dar masa de reinicio a un nodo lo alimenta en
+cada reinicio, venga de donde venga el paseo y sin quitársela a nadie;
+subir el peso de una arista solo surte efecto si el paseo llega a su
+origen, y lo hace a costa de las aristas hermanas, porque la fila se
+renormaliza. Con esa lente, los cuatro sistemas de la línea se resumen en
+la tabla~\ref{tab:palancas}.
+
+\paragraph{HippoRAG: la pregunta entra solo por la siembra.}
+HippoRAG~\cite{hipporag} construye en indexación un grafo de frases
+(las entidades extraídas por extracción abierta) con tres clases de arista
+y peso fijo: aristas de relación entre dos frases, con peso proporcional
+al número de tripletes que las unen;\footnote{Su código inserta cada
+triplete en ambos sentidos sobre un grafo no dirigido, de modo que cada
+triplete aporta peso $2$ entre sus dos frases; los valores de la tabla
+siguiente son los efectivos.} aristas pasaje--frase, con peso $1$; y
+aristas de sinonimia entre frases, con peso igual al coseno de sus
+incrustaciones cuando supera $0{,}80$. En consulta aplica reconocimiento
+de entidades a la pregunta, empareja cada entidad con el nodo-frase más
+afín y pone en $\mathbf{v}$ exactamente esos nodos, ponderados por su
+especificidad (inversa al número de pasajes en que aparecen): la siembra
+es \emph{fuerte} y es la única vía por la que la pregunta entra en el
+paseo; $P$ es la del corpus. El fallo característico es de anclaje: si
+la mención de la pregunta no casa con ningún nodo, no hay semilla.
+
+\paragraph{\hippo{}: hechos, filtro y pesos fijados en indexación.}
+\hippo{}~\cite{hipporag2} conserva el grafo y sus pesos y cambia la
+siembra. Incrusta cada triplete $(s,r,o)$ en un almacén paralelo; en
+consulta puntúa la pregunta contra todos los tripletes, toma los más
+afines y un modelo de lenguaje ---la \emph{memoria de reconocimiento}---
+selecciona los útiles. Las entidades de los tripletes aprobados,
+\emph{sujeto y objeto}, forman la siembra de frases, y todos los pasajes
+reciben además su puntuación densa:
+\begin{equation}
+\mathbf{v}(\varepsilon) \;=\;
+\frac{1}{|T_\varepsilon|}\sum_{t\in T_\varepsilon}\frac{s_q(t)}{|P_\varepsilon|},
+\qquad
+\mathbf{v}(c) \;=\; 0{,}05\cdot\widehat{\cos}(q,c)\quad\text{para todo pasaje } c,
+\label{eq:siembra-hippo}
+\end{equation}
+donde $T_\varepsilon$ son los tripletes aprobados en que participa la
+frase $\varepsilon$, $s_q(t)$ la afinidad consulta--triplete y
+$|P_\varepsilon|$ el número de pasajes en que aparece la frase
+(corrección anti-concentrador). Si el filtro no aprueba ningún triplete,
+el sistema degrada a recuperación densa pura. Dos hechos de esta
+descripción, verificados sobre su código, son los que importan aquí.
+Primero, \hippo{} \emph{no} aplica reconocimiento de entidades a la
+pregunta: el sujeto de la pregunta entra en $\mathbf{v}$ solo si el filtro
+aprueba un triplete que lo contiene, y el \emph{segundo salto} ---la
+entidad puente--- entra por el mismo camino, como objeto del triplete
+aprobado. Segundo, el paseo se ejecuta con los pesos guardados en el
+grafo: $P$ es idéntica para todas las preguntas, y la señal de la consulta
+entra únicamente por $\mathbf{v}$.
+
+\paragraph{La falacia del grafo estático, con los números del corpus.}
+CatRAG~\cite{catrag} da nombre a la consecuencia: como las transiciones
+se fijaron al indexar, las aristas genéricas y los nodos concentradores
+desvían la masa antes de que alcance la evidencia del segundo salto. Para
+hacerlo tangible tomamos filas reales de la matriz $P$ del grafo que el
+código de \hippo{} construyó sobre nuestro corpus de evaluación
+(sección~\ref{sec:comparacion}; $56\,127$ nodos y $305\,826$ aristas):
+\begin{center}\small\setlength{\tabcolsep}{4pt}
+\begin{tabular}{llrrl}
+\toprule
+nodo-frase $u$ & vecino $w$ & $w_{uw}$ & $P(u\to w)$ & observación\\
+\midrule
+god's gift to women & michael curtiz & $2$ & $0{,}105$ & un triplete\\
+god's gift to women & musicals, other countries, frank fay, \dots & $2$ & $0{,}105$ & idéntica\\
+god's gift to women & pasaje \emph{God's Gift to Women} & $1$ & $0{,}053$ & \\
+aldri annet enn bråk & edith carlmar & $6$ & $0{,}316$ & tres tripletes\\
+edith carlmar & bedre enn sitt rykte, fjols til fjells, \dots & $2$ & $0{,}037$ & sus otras películas\\
+michael curtiz & (52 vecinos, $Z_u=103$) & & $\le 0{,}039$ & su biografía a $1/103$\\
+\bottomrule
+\end{tabular}
+\end{center}
+Estas cifras las decidió el extractor en indexación ---cuántos tripletes
+produjo entre cada par de frases--- y valen para cualquier pregunta. Para
+\guillemotleft{}?`qué director es mayor, el de \emph{God's Gift to Women} o el de
+\emph{Aldri annet enn bråk}?\guillemotright{}, la masa que sale de la primera película
+va a su director con la misma probabilidad que a \guillemotleft{}musicals\guillemotright{},
+mientras que de la segunda película a su directora se cruza tres veces
+más fácilmente; y la biografía de Michael Curtiz, un concentrador de 52
+vecinos, recibe una centésima de lo que llega a su nodo. El resultado
+real de \hippo{} en esa pregunta es el previsible: las dos películas y
+Edith Carlmar en los puestos 1--3, \emph{otras} películas de Carlmar en
+los puestos 4--5 y Michael Curtiz ausente del top-10 (la
+sección~\ref{sec:fallan-otros} la analiza junto a la salida de \sys{}).
+
+\paragraph{CatRAG: reponderar el coeficiente y añadir anclas débiles.}
+CatRAG deja intactos el grafo, la siembra de la
+ecuación~\eqref{eq:siembra-hippo} y el filtro de \hippo{}, y añade tres
+mecanismos de consulta. Sea $\mathcal{S}_q$ el conjunto \emph{semilla}
+---las $N_{\text{sem}}=5$ frases de mayor $\mathbf{v}$--- y
+$T_{\text{sem}}$ los tripletes aprobados por el filtro.
+\begin{enumerate}[leftmargin=1.6em, itemsep=2pt]
+\item \textbf{Anclas simbólicas débiles} (palanca $\mathbf{v}$). Recupera
+  el reconocimiento de entidades sobre la pregunta de HippoRAG, pero con
+  masa pequeña: cada entidad reconocida $e$ recibe
+  $\mathbf{v}(e) \mathrel{+}= \epsilon/|P_e|$ con $\epsilon=0{,}2$. Cubre
+  el hueco de \hippo{}: la entidad nombrada en la pregunta ---o una
+  palabra de tipo, \guillemotleft{}universidad\guillemotright{}--- siembra aunque el filtro haya
+  descartado su triplete.
+\item \textbf{Reponderación dinámica de aristas} (palanca $P$). Para cada
+  semilla $u\in\mathcal{S}_q$ se toman sus $K=15$ aristas de relación
+  salientes más afines a la pregunta (coseno entre la pregunta y la
+  incrustación del triplete de la arista) y un modelo de lenguaje puntúa
+  cada vecino $w$ de $0$ a $10$ viendo la pregunta, $T_{\text{sem}}$, el
+  triplete de enlace y un resumen $C(w)$ del vecino, generado por el
+  propio modelo a partir de sus tripletes. La puntuación reescala el peso
+  estático,
+  \begin{equation}
+  \begin{aligned}
+  \hat{w}_{uw} \;&=\; \phi\bigl(\op{LLM}(q,u,w,C(w))\bigr)\cdot w_{uw},\\
+  \phi:\ &0\text{--}3\mapsto 0,\quad 4\text{--}6\mapsto 0{,}2\text{--}0{,}3,\quad
+  7\text{--}9\mapsto 2\text{--}3,\quad 10\mapsto 5,
+  \end{aligned}
+  \label{eq:catrag-aristas}
+  \end{equation}
+  la fila de $u$ se renormaliza y se ejecuta \emph{un solo} paseo sobre la
+  matriz resultante $P_q$. La modulación es asimétrica ---solo aristas
+  salientes de las semillas--- y de \emph{un salto}: no se expande a los
+  vecinos de los vecinos. Sobre la fila real anterior, un $8$ para
+  Michael Curtiz ($\times 2{,}5$), un $5$ para los tres intérpretes
+  ($\times 0{,}25$) y $\le 3$ para el resto dejarían
+  $Z_u = 5 + 1{,}5 + 1 = 7{,}5$ y $P_q(u\to\text{curtiz}) = 0{,}667$
+  frente a $0{,}105$: el mismo grafo, otra matriz para esta pregunta. El
+  vecino no recibe masa de reinicio; recibe más probabilidad de ser
+  cruzado cuando el paseo está en la semilla, a costa de sus hermanos, y
+  con él todo lo que hay detrás de esa arista.
+\item \textbf{Refuerzo de pasajes con hechos verificados} (palanca $P$).
+  La arista semilla$\to$pasaje que respalda un triplete aprobado se
+  amplifica,
+  $\hat{w}_{up} = w_{up}\,\bigl(1+\beta\,\mathbf{1}[(u,p)\text{ respaldada
+  por } T_{\text{sem}}]\bigr)$ con $\beta=2{,}5$.
+\end{enumerate}
+El coste es de hasta cinco llamadas por consulta (una por semilla, con
+sus $15$ vecinos en lote) más los resúmenes de nodo, y el propio artículo
+reconoce que el sistema resulta más caro que la recuperación densa. Su
+ablación en 2Wiki mide la aportación de cada mecanismo en exhaustividad a
+5: $87{,}0$ el sistema completo, $86{,}1$ sin anclas, $85{,}6$ sin
+reponderación y $88{,}4$ sin refuerzo de pasajes (este último, por tanto,
+resta en 2Wiki); en cadena completa, $66{,}1 \to 67{,}6$ sobre \hippo{}.
+
+\paragraph{Por qué la ganancia es acotada: alcance de un salto.}
+El alcance de la reponderación es \guillemotleft{}semillas más una arista\guillemotright{}, y
+\guillemotleft{}una arista desde las semillas\guillemotright{} no equivale a \guillemotleft{}el primer
+salto de la pregunta\guillemotright{}: depende de quién sea semilla. Si el filtro
+aprobó el triplete puente, la entidad puente ya es semilla ---como objeto
+del triplete, ecuación~\ref{eq:siembra-hippo}--- y sus aristas, el
+segundo salto de la pregunta, también se reponderan; el salto lo dio el
+filtro y la reponderación solo lo prolonga una arista. Si el filtro
+\emph{no} lo aprobó ---lo que ocurre en el ejemplo anterior, donde Curtiz
+no figura en ningún triplete aprobado---, la reponderación puede
+amplificar película$\to$Curtiz y el paseo llega a él, pero su fila sigue
+siendo la estática ($Z_u=103$, biografía a $1/103$) y el refuerzo de
+pasaje tampoco le alcanza, porque ningún triplete verificado respalda esa
+arista: la cadena se queda a una arista de completarse. En términos de la
+ecuación~\eqref{eq:neumann}, los tres mecanismos de CatRAG actúan sobre
+el coeficiente o añaden fuentes débiles; la \emph{fuente fuerte} del
+segundo salto sigue siendo el filtro de \hippo{} operando sobre tripletes
+planos y entidades fragmentadas.
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{3.5pt}
+\caption{Por dónde entra la pregunta en el paseo con reinicio
+(ecuación~\ref{eq:neumann}) en cada sistema de la línea. \guillemotleft{}Fuente\guillemotright{}
+es el vector de reinicio $\mathbf{v}$; \guillemotleft{}coeficiente\guillemotright{}, la matriz de
+transición $P$.}
+\label{tab:palancas}
+\begin{tabular}{lp{0.40\textwidth}p{0.38\textwidth}}
+\toprule
+sistema & fuente ($\mathbf{v}$) & coeficiente ($P$)\\
+\midrule
+HippoRAG & entidades de la pregunta (NER), fuerte & fija en indexación\\
+\addlinespace
+\hippo{} & sujeto y objeto de los tripletes aprobados por el filtro
+  ($s_q/|P_\varepsilon|$) $+$ todos los pasajes ($0{,}05$) & fija en
+  indexación\\
+\addlinespace
+CatRAG & lo de \hippo{} $+$ entidades de la pregunta como anclas débiles
+  ($0{,}2/|P_e|$) & reponderada por juez LLM en las aristas salientes de
+  $5$ semillas (un salto) $+$ refuerzo $\times 3{,}5$ de las aristas
+  semilla$\to$pasaje verificadas\\
+\addlinespace
+\sys{} & entidades de los hechos aprobados a peso $1$ (compuerta dura)
+  $+$ entidades enlazadas ($0{,}5$) $+$ \emph{pasaje propio} de cada una
+  ($0{,}5\,\mathbf{v}$) $+$ anclas débiles ($0{,}05$) $+$ todos los
+  pasajes ($0{,}05$) & modulada globalmente por afinidad a la entrada de
+  \emph{todos} los nodos-hecho, $\mu_a\in[0{,}25,\,1]$, sin llamadas
+  (ec.~\ref{eq:modulacion})\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Lo que la evolución deja abierto.}
+Tres observaciones se siguen de este recorrido y fijan el punto de partida
+de la sección~\ref{sec:metodos}. (i)~En toda la línea el segundo salto es
+cuestión de \emph{fuente}: lo da el filtro al sembrar el objeto del
+triplete aprobado, y ningún coeficiente lo sustituye cuando el filtro
+falla. (ii)~Más allá de una arista de las semillas gobierna el grafo
+estático, con sus concentradores y sus aristas genéricas; reponderar por
+juez tiene un coste por arista que impide extender el alcance. (iii)~La
+identidad de las entidades se resuelve en consulta con aristas de
+sinonimia por umbral, de modo que cada eslabón de la cadena es una nueva
+ocasión de quedar en una \guillemotleft{}isla\guillemotright{}. \sys{} responde a las tres:
+resuelve la identidad en indexación (sección~\ref{sec:diccionario});
+promueve el hecho a nodo, de modo que es a la vez un peaje modulable por
+consulta y un punto donde converge la evidencia de todos sus
+participantes (sección~\ref{sec:asercion}); modula el coeficiente
+\emph{globalmente} y sin llamadas, por afinidad consulta--hecho
+(sección~\ref{sec:ppr}); y hace de la siembra la palanca del segundo
+salto: la entidad puente descubierta por el filtro siembra a peso
+completo y su pasaje propio recibe masa directa
+(sección~\ref{sec:siembra}), de modo que la cadena no depende de que el
+paseo la recorra.
+
 \subsection{Relación con el prototipo clínico GeSIDA y con CatRAG}
 \label{sec:relacion}
 
@@ -132,10 +368,12 @@ Este trabajo no parte de cero: el sistema evaluado es la generalización de
 un recuperador en producción dentro de un asistente clínico sobre las guías
 GeSIDA de VIH (sección~\ref{sec:gesida}), que a su vez adoptó y extendió los
 mecanismos de consulta de la línea HippoRAG~2/CatRAG. La genealogía es
-explícita: del lado CatRAG hereda las anclas simbólicas débiles, la
-modulación de transiciones por consulta y la idea de reforzar pasajes clave;
-del lado HippoRAG~2, la siembra densa de todos los pasajes, el filtro de
-memoria de reconocimiento y los diales del paseo. Las aportaciones propias
+explícita (sección~\ref{sec:palancas}): del lado CatRAG hereda las
+anclas simbólicas débiles, la modulación de transiciones por consulta
+---aquí global y sin juez por arista--- y la idea de reforzar pasajes
+clave ---aquí trasladada de la arista a la siembra---; del lado
+HippoRAG~2, la siembra densa de todos los pasajes, el filtro de memoria
+de reconocimiento y los diales del paseo. Las aportaciones propias
 están en la \emph{representación} ---el grafo de aserciones reificadas
 $n$-arias en lugar de tripletes planos--- y en la \emph{resolución de
 entidades} ---una memoria canónica construida en indexación en lugar de
@@ -233,7 +471,7 @@ index. & extractor de aserciones (\S\ref{sec:openie}) & pasaje & $E_c$ + $A_c$ &
 index. & constructor de fichas (\S\ref{sec:diccionario}) & menciones & ficha por mención & 2 emb./mención\\
 index. & generador de candidatos (\S\ref{sec:diccionario}) & fichas & pares candidatos & 0\\
 index. & adjudicador de pares (\S\ref{sec:diccionario}) & pares ambiguos & veredictos & 1 llamada/8 pares\\
-index. & consolidador canónico (\S\ref{sec:diccionario}) & veredictos & diccionario $\mathcal{E}$ & 1 emb./entrada\\
+index. & consolidador canónico (\S\ref{sec:diccionario}) & veredictos & memoria $\mathcal{E}$ (\S\ref{sec:memoria}) & 1 emb./entrada\\
 index. & materializador del grafo (\S\ref{sec:grafo}) & aserciones + dicc. & grafo $G$ & 0\\
 index. & incrustadores (\S\ref{sec:dual}) & $\tau_a$, fichas, pasajes & 3 almacenes vect. & 1 emb./objeto\\
 \midrule
@@ -258,42 +496,56 @@ consulta & PPR modulado (\S\ref{sec:ppr}) & $G$, $\mathbf{v}$, $\tilde\sigma$ & 
   node distance=3mm and 5mm]
   % ---- fase de indexacion
   \node[dato] (corpus) {Corpus\\ $6\,119$ pasajes};
-  \node[caja, right=of corpus] (openie) {Extracción abierta\\ reificada (LLM)\\ \S\ref{sec:openie}};
-  \node[caja, right=of openie] (dicc) {Memoria canónica\\ de entidades\\ \S\ref{sec:diccionario}};
-  \node[caja, right=of dicc] (grafo) {Grafo canónico\\ reificado $G$\\ \S\ref{sec:grafo}};
-  \node[dato, right=of grafo] (emb) {Incrustaciones:\\ hechos, fichas,\\ pasajes};
+  \node[caja, right=of corpus] (openie) {Extracción\\ abierta (LLM)\\ \S\ref{sec:openie}};
+  \node[caja, right=of openie] (dicc) {Resolución de\\ entidades\\ \S\ref{sec:diccionario}};
+  \node[dato, right=of dicc] (mem) {Memoria\\ canónica\\ \S\ref{sec:memoria}};
+  \node[caja, right=of mem] (grafo) {Grafo canónico\\ $G$ \S\ref{sec:grafo}};
+  \node[dato, right=of grafo] (emb) {Incrustaciones\\ (3 almacenes)};
   \draw[fl] (corpus) -- (openie);
   \draw[fl] (openie) -- (dicc);
-  \draw[fl] (dicc) -- (grafo);
+  \draw[fl] (dicc) -- (mem);
+  \draw[fl] (mem) -- (grafo);
   \draw[fl] (grafo) -- (emb);
-  % ---- fase de consulta
-  \node[dato, below=11mm of corpus] (q) {Pregunta $q$};
+  % ---- fase de consulta: dos ramas independientes que convergen en el filtro
+  \node[dato, below=25mm of corpus] (q) {Pregunta $q$};
   \node[caja, right=of q] (router) {Enrutador\\ léxico \S\ref{sec:router}};
-  \node[caja, right=of router] (linker) {Enlazador de\\ menciones \S\ref{sec:linker}};
-  \node[caja, right=of linker] (filtro) {Filtro selector\\ de hechos (LLM)\\ \S\ref{sec:filtro}};
+  \node[caja, above right=6mm and 5mm of router.east, anchor=west] (linker) {Enlazador\\ $L(q)$ \S\ref{sec:linker}};
+  \node[caja, below right=6mm and 5mm of router.east, anchor=west] (afin) {Afinidad\\ $\{v_j\},\ \sigma$ \S\ref{sec:afinidad}};
+  \node[caja, anchor=west] (filtro) at ($(linker.east)!0.5!(afin.east)+(5mm,0)$) {Filtro selector\\ (LLM) $S(q),\tilde\sigma$\\ \S\ref{sec:filtro}};
   \node[caja, right=of filtro] (siembra) {Siembra\\ $\mathbf{v}$ \S\ref{sec:siembra}};
   \node[caja, right=of siembra] (ppr) {PPR\\ modulado \S\ref{sec:ppr}};
   \node[dato, below=3mm of ppr] (out) {pasajes\\ ordenados};
   \draw[fl] (q) -- (router);
-  \draw[fl] (router) -- (linker);
-  \draw[fl] (linker) -- (filtro);
+  \draw[fl] (router.east) -- (linker.west);
+  \draw[fl] (router.east) -- (afin.west);
+  \draw[fl] (linker.east) -- (filtro.west);
+  \draw[fl] (afin.east) -- (filtro.west);
   \draw[fl] (filtro) -- (siembra);
   \draw[fl] (siembra) -- (ppr);
   \draw[fl] (ppr) -- (out);
+  \draw[fl, gray] (linker.north) to[out=15,in=165] node[above, font=\tiny, gray, pos=0.35]{$L(q)$} (siembra.north);
+  \draw[fl, gray] (afin.south) to[out=-15,in=-165] node[below, font=\tiny, gray, pos=0.35]{$\{v_j\},\sigma$} (siembra.south);
   % etiquetas de fase
   \begin{scope}[on background layer]
     \node[fit=(corpus)(emb), draw=gray!60, rounded corners=3pt, inner sep=4pt,
           label={[gray, font=\scriptsize]above left:{indexación (una vez por corpus)}}] {};
-    \node[fit=(q)(ppr)(out), draw=gray!60, rounded corners=3pt, inner sep=4pt,
+    \node[fit=(q)(linker)(afin)(ppr)(out), draw=gray!60, rounded corners=3pt, inner sep=4pt,
           label={[gray, font=\scriptsize]above left:{consulta (en línea, $\sim$1 llamada LLM)}}] {};
   \end{scope}
   % conexion entre fases
   \draw[fl, gray] (grafo.south) to[out=-90,in=90] (ppr.north);
+  \draw[fl, gray] (mem.south) to[out=-90,in=90] (linker.north);
 \end{tikzpicture}
 \caption{Arquitectura de \sys{} en dos fases. La fase de indexación no ve
-ninguna pregunta; la fase de consulta realiza aproximadamente una llamada al
-modelo de lenguaje (el filtro selector; dos en las preguntas de comparación,
-donde se añade la descomposición).}
+ninguna pregunta. La fase de consulta no es una cadena lineal: tras el
+enrutador, la rama \emph{simbólica} (enlazador) y la rama \emph{semántica}
+(afinidad) leen solo la pregunta y son independientes entre sí; convergen
+en el filtro, y la siembra recibe los productos de las tres (las flechas
+grises marcan que $L(q)$ y $\{v_j\},\sigma$ llegan también directamente a
+la siembra). Se realiza aproximadamente una llamada al modelo de lenguaje
+(el filtro; dos en comparación, donde se añade la descomposición). La
+memoria canónica es un artefacto de datos (caja discontinua) que consumen
+tanto el grafo como el enlazador (sección~\ref{sec:memoria}).}
 \label{fig:pipeline}
 \end{figure}
 
@@ -459,42 +711,244 @@ Los grafos extraídos automáticamente sufren la \emph{fragmentación de
 entidades}: la misma persona aparece como \guillemotleft{}H.\,P. Lovecraft\guillemotright{} en un pasaje y
 como \guillemotleft{}Howard Phillips Lovecraft\guillemotright{} en su biografía, y ambas menciones acaban
 en nodos distintos. La solución habitual ---aristas de sinonimia por umbral de
-coseno, como en \hippo{}--- es frágil justo donde más se necesita: el coseno
-entre esas dos formas es $0{,}781$, por debajo del umbral estándar
-$0{,}80$, y el paseo aleatorio se corta en la \guillemotleft{}isla\guillemotright{}. En el análisis de
-errores de la versión previa del sistema, el $57\%$ de los fallos de cadena
-se atribuyó a este fenómeno.
+coseno en consulta, como en \hippo{}--- es frágil justo donde más se
+necesita: el coseno entre esas dos formas es $0{,}781$, por debajo del
+umbral estándar $0{,}80$, y el paseo aleatorio se corta en la
+\guillemotleft{}isla\guillemotright{}. En el análisis de errores de la versión previa del sistema, el
+$57\%$ de los fallos de cadena se atribuyó a este fenómeno.
 
 \sys{} lo resuelve \emph{antes de construir el grafo} con una memoria
 canónica de entidades (un diccionario), construida una única vez desde el
-propio corpus ---nunca desde los datos de evaluación--- en cuatro pasos:
+propio corpus ---nunca desde los datos de evaluación--- y sin curación
+humana. Es un problema clásico de \emph{resolución de entidades}: decidir,
+para cada par de menciones, si nombran el mismo objeto del mundo real, y
+consolidar las que sí en una entrada con identidad. La
+figura~\ref{fig:diccionario} muestra el flujo completo con las cifras reales
+del corpus de evaluación; las secciones que siguen recorren cada paso con
+trazas instrumentadas y terminan con la atribución de cada fusión a su
+mecanismo, la contribución medida al resultado y las limitaciones
+conocidas.
 
-\paragraph{1. Ficha por mención.}
-Para cada par (pasaje $p$, forma de mención $f$) se compone una ficha
-textual $t_m = f \oplus d_m$, donde $d_m$ concatena las frases $\tau_a$ de
-las aserciones de ese pasaje en las que la mención participa (hasta 400
-caracteres). Cada ficha recibe dos incrustaciones: la de la ficha completa,
-$\phi_m = e(t_m)$ (canal de \emph{contexto}), y la del nombre solo,
-$\nu_m = e(f)$ (canal de \emph{nombre}). Además, el título de cada pasaje se
-registra como mención sintética de su sujeto: un artículo enciclopédico
-nombra a su sujeto en el título, y el resto del corpus suele referirse a él
-por esa forma.
+\paragraph{Vocabulario.}
+Como el apartado usa términos de resolución de entidades que no son de uso
+general, los fijamos antes. Una \emph{forma} es la cadena con que un pasaje
+nombra algo (\guillemotleft{}Oskar Roehler\guillemotright{}, \guillemotleft{}Klaus Roehler\guillemotright{}). Una \emph{ficha} es la
+unidad de trabajo: un par (pasaje, forma) con su contexto; la misma persona
+nombrada en dos pasajes produce dos fichas. Un \emph{canal} es una de las dos
+representaciones vectoriales de la ficha (nombre o contexto). Las
+\emph{vecinas} de una ficha son las fichas más próximas por coseno en un
+canal. Un \emph{candidato} es un par de fichas que pasa el filtro barato y
+merece ser juzgado: el paso de candidatos no decide nada, decide \emph{qué
+se decide}. Una \emph{banda} es el destino de un candidato: fusión
+automática, adjudicación por el modelo de lenguaje o descarte. Un
+\emph{grupo} es un conjunto de fichas unidas por cierre transitivo, y una
+\emph{entrada canónica} es la entidad que resume ese grupo. Una
+\emph{colisión} es lo contrario de una fusión: dos entradas \emph{distintas}
+cuyo nombre canónico coincide (dos personas llamadas John Middleton), que
+reciben identificadores diferenciados.
+
+\begin{figure}[p]
+\centering
+\begin{tikzpicture}[
+  font=\scriptsize,
+  paso/.style={draw, rounded corners=2pt, align=center, inner sep=3pt, fill=gray!8, text width=62mm},
+  dato/.style={draw, dashed, rounded corners=2pt, align=center, inner sep=3pt, text width=62mm},
+  rama/.style={draw, rounded corners=2pt, align=center, inner sep=2.5pt, text width=29mm, minimum height=10mm},
+  fin/.style={draw, densely dotted, rounded corners=2pt, align=center, inner sep=2.5pt, text width=29mm, minimum height=10mm, text=black!70},
+  nota/.style={font=\tiny, text=black!75, align=left, text width=40mm},
+  fl/.style={-{Stealth[length=2mm]}, semithick},
+  et/.style={font=\tiny, fill=white, inner sep=1pt},
+  node distance=4mm and 5mm]
+  % ------------------------------------------------ columna central
+  \node[dato] (corpus) {\textbf{Entrada} (\S\ref{sec:openie}): $6\,119$ pasajes
+    $\to$ $38\,934$ menciones de entidad y $47\,999$ aserciones con frase $\tau_a$};
+  \node[paso, below=of corpus] (fichas) {\textbf{Paso 1 --- una ficha por (pasaje, forma)}\\
+    forma $f$; descripción $d_m$ = frases $\tau_a$ del pasaje en que participa
+    ($\le 400$ car.); años de nacimiento/muerte; ?`es el título?\\
+    $+\,1\,342$ menciones sintéticas de título $\;\Rightarrow\;$ \textbf{$40\,276$ fichas}};
+  \node[rama, below left=4mm and 1mm of fichas.south] (nu) {canal \textbf{nombre}\\ $\nu_m = e(f)$};
+  \node[rama, below right=4mm and 1mm of fichas.south] (phi) {canal \textbf{contexto}\\ $\phi_m = e(f \oplus d_m)$};
+  \coordinate (mid) at ($(nu.south)!0.5!(phi.south)$);
+  \node[paso, below=4mm of mid] (cand) {\textbf{Paso 2 --- candidatos}\\
+    fila completa de cosenos por bloques; $15$ vecinas por canal;
+    se excluye el mismo pasaje; umbrales $\nu \ge 0{,}80$ ó $\phi \ge 0{,}75$\\
+    $811$ millones de pares posibles $\;\Rightarrow\;$ \textbf{$47\,063$ pares examinados}};
+  \node[paso, below=of cand] (restr) {\textbf{Paso 3a --- restricciones duras}\\
+    fechas de nacimiento o muerte disjuntas; ordinales nobiliarios o regnales
+    distintos $\;\Rightarrow\;$ el par se descarta sin más};
+  \node[rama, below=of restr] (llm) {\textbf{banda LLM}\\ $9\,772$ pares, lotes de 8, caché\\ $2\,322$ sí / $7\,450$ no};
+  \node[rama, left=3mm of llm] (auto) {\textbf{fusión automática}\\ nombre base idéntico, o\\ $\nu\ge0{,}90 \wedge \phi\ge0{,}70$\\ $32\,500$ pares};
+  \node[fin, right=3mm of llm] (desc) {\textbf{descarte}\\ ninguna regla; o coseno alto pero fechas u ordinal incompatibles};
+  \node[paso, below=6mm of llm] (cierre) {\textbf{Paso 3c --- cierre transitivo} (unión--búsqueda)\\
+    todo par aceptado une sus grupos; el mismo pasaje nunca une por coseno};
+  \node[rama, left=3mm of cierre] (tit) {\textbf{Paso 3b --- título$\to$sujeto}\\ $2\,848$ uniones ($2\,431$ nuevas)};
+  \node[paso, below=of cierre] (entrada) {\textbf{Paso 4 --- entrada canónica por grupo}\\
+    nombre (preferencia: forma-título), alias, descripción fusionada, pasajes,
+    pasaje propio $\pi(\varepsilon)$; mapa (pasaje, forma) $\to$ id; incrustación de la ficha fusionada\\
+    \textbf{$26\,960$ entradas}: $21\,144$ con 1 mención, $5\,816$ con $>1$, $36$ colisiones};
+  \node[dato, below=of entrada] (salida) {\textbf{Salida}: grafo canónico sin aristas de sinonimia (\S\ref{sec:grafo});
+    tabla de alias del enlazador (\S\ref{sec:linker}); pasaje propio para la siembra (\S\ref{sec:siembra})};
+  % ------------------------------------------------ flechas
+  \draw[fl] (corpus) -- (fichas);
+  \draw[fl] (fichas.south) -- (nu.north);
+  \draw[fl] (fichas.south) -- (phi.north);
+  \draw[fl] (nu.south) -- (cand.north);
+  \draw[fl] (phi.south) -- (cand.north);
+  \draw[fl] (cand) -- (restr);
+  \draw[fl] (restr.south) -- (llm.north);
+  \draw[fl] (restr.south) -- (auto.north);
+  \draw[fl] (restr.south) -- (desc.north);
+  \draw[fl] (auto.south) -- (cierre.north west);
+  \draw[fl] (llm.south) -- node[et, right]{solo los \guillemotleft{}sí\guillemotright{}} (cierre.north);
+  \draw[fl] (tit.east) -- (cierre.west);
+  \draw[fl] (cierre) -- (entrada);
+  \draw[fl] (entrada) -- (salida);
+  % ------------------------------------------------ notas laterales
+  \node[nota, right=3mm of fichas] {\emph{Ejemplo}: \texttt{Atomised (film)||oskar roehler}
+    (desc: \guillemotleft{}Atomised was directed by Oskar Roehler. Atomised was written by
+    Oskar Roehler.\guillemotright{}) y \texttt{Oskar Roehler||oskar roehler} (título; nac.\ 1959;
+    desc con sus 11 hechos) son dos fichas distintas de la misma persona.};
+  \node[nota, right=3mm of cand] {De $74\,580$ pares sobre umbral, el tope de 15
+    deja fuera $27\,517$, todos de concentradores (\guillemotleft{}France\guillemotright{}: $4\,809$), que
+    el cierre transitivo recupera. El canal contexto gasta $4{,}9$ de sus 15 huecos
+    en fichas del mismo pasaje (el canal nombre, $0{,}6$).};
+  \node[nota, right=3mm of desc] {\emph{Ejemplos}: dos \guillemotleft{}William Ferguson\guillemotright{}
+    ($\nu = 1{,}000$; nacidos en 1809 y 1938); \guillemotleft{}Robert II\guillemotright{} y \guillemotleft{}Robert III of
+    Dreux\guillemotright{} ($\nu = 0{,}873$; 1154 y 1185).};
+  \node[nota, right=3mm of entrada] {\emph{Fusión}: \texttt{can:robert a. stemmle} =
+    \{Robert A. Stemmle, Robert Adolf Stemmle\}, pasajes \{biografía, película\}.
+    \emph{Colisión}: \texttt{can:aleksander koniecpolski} (1620--1659) y
+    \texttt{can:aleksander koniecpolski\#799} (1555--1609), abuelo y nieto.};
+\end{tikzpicture}
+\caption{Construcción de la memoria canónica de entidades sobre el corpus de
+evaluación, con las cifras reales de cada etapa. El paso 2 no decide nada:
+reduce $811$ millones de pares posibles a los $47\,063$ que se juzgan. El
+paso 3 combina tres fuentes de unión ---automática, adjudicada por el modelo
+de lenguaje y la heurística título$\to$sujeto--- que el cierre transitivo
+consolida en grupos; el paso 4 convierte cada grupo en una entrada con
+identidad. Las notas laterales dan un ejemplo real de cada etapa.}
+\label{fig:diccionario}
+\end{figure}
+
+\paragraph{1. Ficha por (pasaje, forma de mención).}
+Para cada pasaje $p$ y cada forma $f$ de su lista de menciones (la que
+devolvió el extractor de la sección~\ref{sec:openie}) se compone una ficha
+con los campos de la tabla~\ref{tab:ficha}. La ficha se construye
+\emph{antes} de que exista nada canónico: lo canónico es la salida del
+procedimiento, la ficha es su entrada, y por eso la misma persona nombrada
+en dos pasajes produce dos fichas con descripciones distintas. Además, el
+título de cada pasaje se registra como mención \emph{sintética} de su
+sujeto cuando el extractor no lo devolvió ya como forma: un artículo
+enciclopédico nombra a su sujeto en el título (\guillemotleft{}Charlie Day\guillemotright{}) aunque su
+texto use la forma legal (\guillemotleft{}Charles Peckham Day\guillemotright{}), y el resto del corpus
+suele referirse a él por la forma del título. Sobre el corpus de evaluación:
+$38\,934$ menciones extraídas $+\,1\,342$ títulos sintéticos $= 40\,276$
+fichas. Cada ficha recibe dos incrustaciones: la del nombre solo,
+$\nu_m = e(f)$ (canal \emph{nombre}), y la de la ficha completa
+$t_m = f \oplus d_m$, $\phi_m = e(t_m)$ (canal \emph{contexto}).
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{Campos de una ficha, con las dos fichas reales de Oskar Roehler.
+La descripción $d_m$ concatena, sin repetir, las frases $\tau_a$ del pasaje
+en las que la forma es sujeto, objeto o aparece en el texto (corte a 400
+caracteres).}
+\label{tab:ficha}
+\begin{tabular}{l>{\raggedright\arraybackslash}p{0.19\textwidth}>{\raggedright\arraybackslash}p{0.26\textwidth}>{\raggedright\arraybackslash}p{0.26\textwidth}}
+\toprule
+campo & qué es & \texttt{Oskar Roehler||oskar roehler} & \texttt{Atomised (film)||oskar roehler}\\
+\midrule
+clave & pasaje $\|$ forma plegada & (encabezado) & (encabezado)\\
+forma $f$ & la mención tal cual & Oskar Roehler & Oskar Roehler\\
+pasaje & de dónde procede & \emph{Oskar Roehler} & \emph{Atomised (film)}\\
+es\_título & ?`coincide con el título? & sí & no\\
+descripción $d_m$ & frases $\tau_a$ del pasaje & \guillemotleft{}Oskar Roehler was born on 21 January
+  1959. Oskar Roehler was born in Starnberg. Oskar Roehler is a film director.
+  \dots\ is the son of Klaus Roehler. \dots\ is the son of Gisela Elsner. \dots\guillemotright{}
+  & \guillemotleft{}Atomised was directed by Oskar Roehler. Atomised was written by Oskar
+  Roehler.\guillemotright{}\\
+nac.\ / muerte & años de las aserciones \texttt{DATE\_OF\_BIRTH} y \texttt{DATE\_OF\_DEATH} & \{1959\} / \{\} & \{\} / \{\}\\
+texto de $\phi_m$ & \guillemotleft{}forma --- descripción\guillemotright{} & \guillemotleft{}Oskar Roehler --- Oskar Roehler was
+  born \dots\guillemotright{} & \guillemotleft{}Oskar Roehler --- Atomised was directed \dots\guillemotright{}\\
+texto de $\nu_m$ & la forma sola & \guillemotleft{}Oskar Roehler\guillemotright{} & \guillemotleft{}Oskar Roehler\guillemotright{}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\emph{En el ejemplo}: los pasajes \emph{Oskar Roehler} y \emph{Atomised
+(film)} generan $11 + 21 = 32$ fichas. Las dos de Oskar Roehler
+(tabla~\ref{tab:ficha}) muestran lo distinta que es la descripción según el
+pasaje: por eso el canal nombre es el principal y el contexto solo aporta
+evidencia. En \emph{Atomised (film)} no hace falta título sintético (la
+forma \guillemotleft{}Atomised\guillemotright{} ya estaba entre las menciones), de modo que su
+ficha-título \texttt{Atomised (film)||atomised} lleva los nueve hechos de
+la película. Y hay fichas pobres: \texttt{Atomised (film)||bruno}, un
+personaje, tiene por toda descripción \guillemotleft{}Atomised stars Moritz Bleibtreu as
+Bruno.\guillemotright{}
 
 \paragraph{2. Generación de candidatos por dos canales.}
-Para cada ficha se consideran sus $15$ vecinas más próximas por cada canal.
-Un par $(m,m')$ de pasajes distintos es candidato si
-$\langle\nu_m,\nu_{m'}\rangle \geq 0{,}80$ (variante de nombre) o si
-$\langle\phi_m,\phi_{m'}\rangle \geq 0{,}75$ y ambas formas comparten al
-menos un término significativo (contexto afín). Dos menciones del mismo
-pasaje nunca se fusionan (en un artículo, formas distintas denotan entidades
-distintas).
+Con $40\,276$ fichas hay $811$ millones de pares posibles; ni las reglas
+con restricciones, ni mucho menos el modelo de lenguaje, pueden juzgarlos
+todos. El paso de candidatos es el filtro que reduce ese espacio a una
+lista corta. Se calcula por bloques la fila \emph{completa} de cosenos de
+cada ficha contra las $40\,276$ en ambos canales, y de cada fila se toman
+las $15$ vecinas más próximas por canal (unión de ambas listas: a lo sumo
+$30$ parejas por ficha). Se eliminan las parejas del mismo pasaje ---en un
+artículo, formas distintas denotan entidades distintas--- y las que no
+alcanzan ningún umbral ($\langle\nu_m,\nu_{m'}\rangle < 0{,}80$ y
+$\langle\phi_m,\phi_{m'}\rangle < 0{,}75$). Lo que queda son los
+candidatos que entran en el paso~3: $47\,063$ pares, de los que $32\,500$
+caen en la banda automática y $9\,772$ en la banda del modelo de lenguaje.
+
+\emph{En el ejemplo}: las $15$ vecinas de \texttt{Atomised (film)||oskar
+roehler} por el canal nombre son, en orden, \texttt{Oskar Roehler||oskar
+roehler} ($\nu = 1{,}000$, $\phi = 0{,}659$: fusión automática, correcta),
+\texttt{Oskar Roehler||klaus roehler} ($0{,}675$ / $0{,}563$: descartada,
+correcta ---es el padre---), y después Oscar Blumenthal, Oskar Drobne,
+Oscar Straus\dots\ ($\nu \approx 0{,}50$--$0{,}59$), parecidos de nombre de
+pila, todas descartadas. Por el canal contexto, en cambio, sus vecinas son
+\texttt{Atomised (film)||atomised} ($\phi = 0{,}730$, mismo pasaje),
+Christoph Schlingensief, Bernd Eichinger, Niklaus Schilling, Germany,
+Berlin\dots: los \emph{compañeros de pasaje}. Lo mismo ocurre con
+\texttt{H. P. Lovecraft||howard phillips lovecraft}, cuyas vecinas de
+contexto son Rhode Island ($0{,}746$), Providence ($0{,}741$) y Cthulhu
+Mythos. Es una propiedad del diseño que conviene dejar dicha: como la
+descripción reúne frases del pasaje, \textbf{el canal contexto mide sobre
+todo \guillemotleft{}mismo pasaje\guillemotright{}, no \guillemotleft{}misma entidad\guillemotright{}}, y esas parejas se excluyen por
+regla; de media, $4{,}9$ de sus $15$ huecos los ocupan fichas del mismo
+pasaje (frente a $0{,}6$ en el canal nombre). Su papel efectivo es de
+confirmación (los umbrales de contexto de la ecuación~\ref{eq:adjudicacion}),
+no de generación: el canal nombre es el que genera.
+
+\emph{Sobre el tope de $15$ vecinas.} Como la fila completa de cosenos ya
+se calcula, el tope no ahorra coste; solo limita cuántas parejas de una
+fila ya pagada se examinan. Medido: $74\,580$ pares de pasajes distintos
+superan algún umbral y el tope deja fuera $27\,517$ ($23\,260$ serían
+fusión automática, $3\,902$ irían al modelo de lenguaje). Todos son
+concentradores ---\guillemotleft{}France\guillemotright{} $4\,809$ pares, \guillemotleft{}United States\guillemotright{} $3\,711$,
+\guillemotleft{}New York City\guillemotright{} $1\,955$--- y el cierre transitivo del paso~3 los
+recupera: cada mención de \guillemotleft{}France\guillemotright{} ve a otras $15$ con coseno $1{,}000$ y
+la estructura unión--búsqueda encadena las $111$ en una sola entrada. El
+efecto práctico del tope es, por tanto, nulo en este corpus; las entidades
+que importan para el multisalto (directores, madres, películas) tienen
+pocas menciones, muy por debajo de $15$. El tope es un presupuesto, no un
+criterio semántico, y como diseño sería preferible pre-agrupar por nombre
+plegado exacto ($40\,276$ fichas $\to$ $30\,812$ formas distintas; $4\,530$
+aparecen en dos o más pasajes), aplicar los umbrales a la fila completa y
+limitar por ficha únicamente la banda del modelo de lenguaje, que es la que
+tiene coste.
 
 \paragraph{3. Adjudicación en tres bandas con restricciones duras.}
-Antes de decidir se aplican dos restricciones de incompatibilidad: fechas de
-nacimiento o muerte disjuntas, y numerales ordinales distintos en títulos
-nobiliarios o regnales (\guillemotleft{}4th Baron\guillemotright{} frente a \guillemotleft{}5th Baron\guillemotright{}; \guillemotleft{}Edward III\guillemotright{}
-frente a \guillemotleft{}Edward IV\guillemotright{}), que separan parientes, sucesores y homónimos. Sobre
-los pares compatibles:
+Antes de decidir se aplican dos restricciones de incompatibilidad: fechas
+de nacimiento o muerte disjuntas, y numerales ordinales distintos en
+títulos nobiliarios o regnales (\guillemotleft{}4th Baron\guillemotright{} frente a \guillemotleft{}5th Baron\guillemotright{};
+\guillemotleft{}Edward III\guillemotright{} frente a \guillemotleft{}Edward IV\guillemotright{}), que separan parientes, sucesores y
+homónimos aunque el coseno sea alto. Casos reales bloqueados: \guillemotleft{}Robert II
+of Dreux\guillemotright{} (n.~1154) frente a \guillemotleft{}Robert III of Dreux\guillemotright{} (n.~1185), con
+$\nu = 0{,}873$ y $\phi = 0{,}822$; \guillemotleft{}Robert Petre, 7th Baron Petre\guillemotright{} (n.~1689)
+frente a \guillemotleft{}Robert James Petre, 8th Baron Petre\guillemotright{} (n.~1713), con
+$0{,}914$ / $0{,}876$; y dos \guillemotleft{}William Ferguson\guillemotright{} con nombre idéntico
+($\nu = 1{,}000$) nacidos en 1809 y 1938. Sobre los pares compatibles:
 \begin{equation}
 \op{decisión}(m,m') =
 \begin{cases}
@@ -510,12 +964,65 @@ los pares compatibles:
 \end{equation}
 donde $\op{base}(\cdot)$ normaliza el nombre (minúsculas, sin paréntesis).
 La banda ambigua se resuelve con el modelo de lenguaje viendo las dos fichas
-y sus artículos de origen, en lotes de 8 pares con caché persistente, con
-una consigna deliberadamente estricta: parientes, sucesores, homónimos y nuevas
-versiones de una obra \emph{no} son la misma entidad; una forma corta y una
-forma completa del mismo nombre \emph{sí}. Los veredictos positivos se
-cierran transitivamente mediante una estructura unión--búsqueda, y la
-mención-título de cada pasaje se une a la mención del sujeto del artículo.
+y sus artículos de origen, en lotes de $8$ pares con caché persistente, con
+una consigna deliberadamente estricta: parientes, sucesores, homónimos y
+nuevas versiones de una obra \emph{no} son la misma entidad; una forma
+corta y una forma completa del mismo nombre \emph{sí}. El juez es
+conservador: de los $9\,772$ pares que vio dijo \emph{misma} en $2\,322$
+($24\%$). Un rechazo real: \guillemotleft{}A Matter of Time\guillemotright{} frente a \guillemotleft{}Just a Matter of
+Time\guillemotright{}, con coseno $0{,}920$ en ambos canales, son dos películas.
+
+A las uniones automáticas y a los \guillemotleft{}sí\guillemotright{} del juez se añade una tercera fuente
+de unión, la heurística \emph{título$\to$sujeto}: en cada pasaje, la
+mención-título se une a la mención no-título con más términos
+significativos en común (desempatando por la de descripción más larga),
+siempre que sus fechas sean compatibles. Está pensada para el título
+sintético: en el artículo \emph{Charlie Day} une la forma del título con
+\guillemotleft{}Charles Peckham Day\guillemotright{}; en \emph{Robert North Bradbury}, con \guillemotleft{}Robert N.
+Bradbury\guillemotright{}. Produce $2\,848$ uniones, de las que $2\,431$ no estaban
+cubiertas por los dos canales. Todas las uniones ---automáticas, del juez y
+de título--- se cierran transitivamente mediante una estructura
+unión--búsqueda: si $A \sim B$ y $B \sim C$, las tres fichas forman un
+grupo aunque $A$ y $C$ nunca se compararan.
+
+\paragraph{El caso Lovecraft, resuelto paso a paso.}
+El ejemplo con que abre la sección permite ver los tres pasos actuando
+sobre datos reales y, de paso, corregir una intuición fácil: la isla
+\emph{no} la resuelve el juez. El corpus tiene cinco fichas con
+\guillemotleft{}lovecraft\guillemotright{}: tres en el artículo \emph{H. P. Lovecraft}
+(\texttt{howard phillips lovecraft}, con fechas 1890--1937; \texttt{h. p.
+lovecraft}, que es el título; \texttt{lovecraftian horror}) y dos en
+\emph{Sonia Greene} (\texttt{h. p. lovecraft}, con descripción \guillemotleft{}Sonia Haft
+Greene Lovecraft Davis was married to H. P. Lovecraft.\guillemotright{}, y la propia Sonia).
+Los pares entre pasajes distintos y su destino:
+
+\begin{center}\footnotesize
+\begin{tabular}{llccl}
+\toprule
+ficha $A$ & ficha $B$ & $\nu$ & $\phi$ & banda\\
+\midrule
+\emph{H. P. Lovecraft} $\|$ howard phillips lovecraft & \emph{Sonia Greene} $\|$ h. p. lovecraft & $\mathbf{0{,}781}$ & $0{,}479$ & descartado\\
+\emph{H. P. Lovecraft} $\|$ h. p. lovecraft & \emph{Sonia Greene} $\|$ h. p. lovecraft & $1{,}000$ & $0{,}625$ & \textbf{automática}\\
+\emph{H. P. Lovecraft} $\|$ lovecraftian horror & \emph{Sonia Greene} $\|$ h. p. lovecraft & $0{,}725$ & $0{,}439$ & descartado\\
+(los seis restantes) & & $<0{,}50$ & $<0{,}45$ & descartado\\
+\bottomrule
+\end{tabular}
+\end{center}
+
+Ahí está el $0{,}781$: es el coseno de \emph{nombre} entre \guillemotleft{}Howard Phillips
+Lovecraft\guillemotright{} y \guillemotleft{}H. P. Lovecraft\guillemotright{}. Con $\phi = 0{,}479 < 0{,}75$ y
+$\nu < 0{,}80$, la ecuación~\eqref{eq:adjudicacion} lo descarta antes de
+llegar al modelo de lenguaje (comprobado en la caché: el par nunca se
+consultó). La isla la cierran los otros dos mecanismos: la heurística
+título$\to$sujeto une, \emph{dentro} del artículo, la ficha-título
+\guillemotleft{}H. P. Lovecraft\guillemotright{} con \guillemotleft{}Howard Phillips Lovecraft\guillemotright{} (comparten el término
+\guillemotleft{}lovecraft\guillemotright{}, y la ficha-título no tiene fechas que lo impidan); y la
+fusión automática une la ficha-título con la mención idéntica del artículo
+de Sonia Greene ($\nu = 1{,}000$). El cierre transitivo hace el resto. La
+lección es doble: los dos canales vectoriales solos \emph{no} habrían
+resuelto el caso emblemático, y la resolución descansa en un supuesto
+enciclopédico ---el título nombra al sujeto, y los demás artículos lo
+nombran por esa forma--- cuyo alcance se discute más abajo.
 
 \paragraph{4. Entrada canónica.}
 Cada grupo resultante produce una entrada
@@ -524,11 +1031,14 @@ Cada grupo resultante produce una entrada
 \text{descripción},\; \mathcal{P}_\varepsilon,\; \pi(\varepsilon)\bigr):
 \]
 nombre canónico (con preferencia por la forma-título), conjunto de alias
-$\mathcal{A}_\varepsilon$, descripción fusionada, pasajes donde aparece y,
-si existe, su \emph{pasaje propio} $\pi(\varepsilon)$ (el artículo cuyo
-sujeto es $\varepsilon$). La ficha fusionada se incrusta y sirve de
-representación vectorial de la entidad. Un ejemplo real del diccionario
-construido:
+$\mathcal{A}_\varepsilon$ (todas las formas del grupo más los títulos de
+sus pasajes propios), descripción fusionada (unión sin repetición de las
+descripciones, hasta 600 caracteres), pasajes donde aparece y, si existe,
+su \emph{pasaje propio} $\pi(\varepsilon)$ (el artículo cuyo sujeto es
+$\varepsilon$). Se guarda además el mapa (pasaje, forma) $\to$
+identificador, que es lo que el grafo usa para colapsar cada mención a su
+nodo, y la ficha fusionada se incrusta como representación vectorial de la
+entidad. El grupo de Lovecraft produce:
 
 \begin{quote}\small
 \texttt{id}: \texttt{can:h. p. lovecraft} \quad
@@ -536,14 +1046,442 @@ construido:
 \texttt{alias}: \{H.\,P. Lovecraft; Howard Phillips Lovecraft\}\\
 \texttt{descripción}: \guillemotleft{}Howard Phillips Lovecraft was born on August 20,
 1890 \dots\ was an American writer of weird fiction and horror fiction
-\dots\guillemotright{} \quad \texttt{pasaje propio}: \emph{H. P. Lovecraft}
+\dots\ Sonia Haft Greene Lovecraft Davis was married to H P Lovecraft.\guillemotright{}\\
+\texttt{pasajes}: \{\emph{H. P. Lovecraft}; \emph{Sonia Greene}\} \quad
+\texttt{pasaje propio}: \emph{H. P. Lovecraft} \quad
+\texttt{menciones}: 3
 \end{quote}
 
-Sobre el corpus de evaluación, las $38\,934$ menciones (más las menciones
-sintéticas de título) se agrupan en $26\,960$ entradas canónicas con
-$31\,839$ alias; $5\,816$ entradas agrupan más de una mención y $5\,601$
-tienen pasaje propio. En el conjunto de sondeo, el procedimiento resolvió
-$178$ de las $188$ \guillemotleft{}islas\guillemotright{} detectadas en el análisis de errores.
+\guillemotleft{}Lovecraftian horror\guillemotright{} queda, correctamente, como entrada aparte. Si dos
+grupos distintos reciben el mismo nombre canónico, el segundo lleva un
+sufijo: es una \emph{colisión}, y hay $36$ en el diccionario. Son homónimos
+que las restricciones mantuvieron separados ---\texttt{can:aleksander
+koniecpolski} (1620--1659) y \texttt{can:aleksander koniecpolski\#799}
+(1555--1609), abuelo y nieto; \texttt{can:john middleton} (arquitecto,
+n.~1820) y \texttt{can:john middleton\#1029} (futbolista, n.~1955)--- o dos
+obras del mismo título citadas en un mismo artículo (\emph{The Time, the
+Place and the Girl}, 1929 y 1946), que la regla del mismo pasaje no une.
+Las colisiones son, por tanto, el diccionario \emph{negándose} a fundir:
+no deben confundirse con su rendimiento, que resume la
+tabla~\ref{tab:dicc-cifras}.
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{5pt}
+\caption{El diccionario sobre el corpus de evaluación: distribución de las
+entradas por número de menciones fundidas y ejemplos reales de fusión con
+formas de nombre distintas.}
+\label{tab:dicc-cifras}
+\begin{tabular}{lr@{\quad}l>{\raggedright\arraybackslash}p{0.34\textwidth}}
+\toprule
+menciones por entrada & entradas & ejemplo de fusión (id canónico) & alias\\
+\midrule
+1 & $21\,144$ & \texttt{can:robert a. stemmle} & Robert A. Stemmle; Robert Adolf Stemmle\\
+2 & $3\,604$ & \texttt{can:ernest e. bryan} & Ernest Bryan; Ernest E. Bryan\\
+3 & $1\,051$ & \texttt{can:gabriel cañellas} & Gabriel Cañellas; Gabriel Cañellas Fons\\
+4 & $447$ & \texttt{can:love, honor, and oh baby!} & tres grafías del título\\
+5 & $213$ & \texttt{can:united states} & U.S.; United States; United States of America\\
+6--9 & $323$ & \texttt{can:h. p. lovecraft} & H. P. Lovecraft; Howard Phillips Lovecraft\\
+$\ge 10$ & $178$ & \texttt{can:france} & France ($111$ menciones)\\
+\midrule
+\multicolumn{4}{l}{total: $26\,960$ entradas; $5\,816$ con más de una mención ($19\,132$ menciones fundidas);}\\
+\multicolumn{4}{l}{$3\,450$ con dos o más formas de nombre distintas ($719$ con tres o más);}\\
+\multicolumn{4}{l}{$31\,839$ alias; $5\,601$ con pasaje propio; $36$ colisiones.}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+El caso \texttt{can:robert a. stemmle} es el puente de libro: el artículo
+de la película \emph{You Can No Longer Remain Silent} nombra al director
+por su nombre legal completo y su biografía lleva las iniciales en el
+título; antes del diccionario eran dos nodos sin arista fiable, ahora son
+un nodo con dos alias, dos pasajes y la biografía como pasaje propio. En el
+conjunto de sondeo, el procedimiento resolvió $178$ de las $188$
+\guillemotleft{}islas\guillemotright{} detectadas en el análisis de errores.
+
+\paragraph{Qué mecanismo fusiona qué.}
+Como las tres fuentes de unión se aplican en cascada sobre la misma
+estructura unión--búsqueda, su contribución se puede atribuir
+reconstruyendo el diccionario con cada fuente añadida por turno
+(tabla~\ref{tab:dicc-atribucion}; la reconstrucción reproduce el
+diccionario publicado al entero: $26\,961$ entradas frente a $26\,960$).
+La lectura es clara: la fusión automática hace el grueso (la misma cadena
+en pasajes distintos), el juez aporta poco en número ($1\,164$ entradas
+menos) y la heurística título$\to$sujeto \textbf{fusiona más que el
+juez}: $2\,220$ entradas finales con varias menciones existen solo gracias
+a ella. Es el mecanismo que resuelve Lovecraft y, como se verá, el que
+concentra los errores conocidos.
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{5pt}
+\caption{Atribución de las fusiones del diccionario a cada fuente de unión,
+reconstruyendo el cierre transitivo de forma acumulativa.}
+\label{tab:dicc-atribucion}
+\begin{tabular}{lrrr}
+\toprule
+fuentes de unión aplicadas & entradas & con $>1$ mención & fichas fundidas\\
+\midrule
+solo automática (nombre idéntico; $\nu\ge0{,}90 \wedge \phi\ge0{,}70$) & $30\,546$ & $4\,536$ & $14\,266$\\
+$+$ juez (banda ambigua: $2\,322$ \guillemotleft{}sí\guillemotright{} de $9\,772$) & $29\,382$ & $4\,464$ & $15\,358$\\
+$+$ título$\to$sujeto ($2\,848$ uniones) & $26\,961$ & $5\,815$ & $19\,130$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Contribución medida al resultado.}
+El efecto del diccionario sobre la recuperación está medido de forma
+pareada sobre el banco de pruebas, comparando la versión con diccionario
+(v3) con la inmediatamente anterior (v2), que resolvía la sinonimia en
+consulta con aristas por umbral de coseno $0{,}80$ ---el esquema de
+\hippo{}--- y era idéntica en todo lo demás (tabla~\ref{tab:dicc-impacto}).
+Es el mayor salto de la secuencia de versiones de la
+sección~\ref{sec:comparacion}. La reserva honesta es que mide el
+\emph{paquete} que el diccionario hace posible ---el propio diccionario, el
+enlazador por alias exacto (\S\ref{sec:linker}), los candidatos de frontera
+y la masa en el pasaje propio (\S\ref{sec:siembra})--- y no el diccionario
+aislado; pero el enlazador y el pasaje propio \emph{consumen} el diccionario
+y no existen sin él.
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{5pt}
+\caption{Comparación pareada sobre las $1\,000$ preguntas del banco: versión
+con memoria canónica (v3) frente a la misma versión con sinonimia por
+coseno en consulta (v2). Diferencias en puntos con intervalo de confianza
+del $95\%$ por bootstrap pareado.}
+\label{tab:dicc-impacto}
+\begin{tabular}{lcccc}
+\toprule
+métrica & v2 (sinonimia $0{,}80$) & v3 (diccionario) & $\Delta$ [IC $95\%$] & gana / pierde\\
+\midrule
+$\mathrm{R@}2$ & $70{,}4$ & $73{,}0$ & $+2{,}6$ $[+1{,}2, +3{,}9]$ sig. & $115$ / $67$\\
+$\mathrm{R@}5$ & $90{,}9$ & $96{,}0$ & $+5{,}2$ $[+4{,}2, +6{,}2]$ sig. & $152$ / $12$\\
+$\mathrm{FC@}5$ & $78{,}2$ & $90{,}6$ & $+12{,}4$ $[+10{,}2, +14{,}7]$ sig. & $136$ / $12$\\
+$\mathrm{FC@}10$ & $85{,}8$ & $93{,}4$ & $+7{,}6$ $[+5{,}7, +9{,}5]$ sig. & $83$ / $7$\\
+\midrule
+$\mathrm{FC@}5$ comparación-puente & $55{,}7$ & $83{,}8$ & $+28{,}1$ $[+22{,}6, +34{,}0]$ sig. & \\
+$\mathrm{FC@}5$ composicional & $79{,}2$ & $91{,}0$ & $+11{,}9$ $[+8{,}5, +15{,}5]$ sig. & \\
+$\mathrm{FC@}5$ comparación & $96{,}3$ & $99{,}2$ & $+2{,}9$ $[+0{,}4, +5{,}3]$ sig. & \\
+$\mathrm{FC@}5$ inferencia & & & $+1{,}9$ $[-4{,}6, +8{,}3]$ n.s. & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Limitaciones conocidas y validación pendiente.}
+La instrumentación anterior saca a la luz defectos que el agregado oculta
+y que conviene dejar registrados.
+\begin{enumerate}[leftmargin=1.6em, itemsep=1pt]
+\item \textbf{Sobreaplicación de la heurística título$\to$sujeto.} Está
+  pensada para el título sintético, pero se ejecuta también cuando el
+  título ya es una mención propia del pasaje ($1\,549$ de las $2\,848$
+  uniones); en ese caso excluye la ficha-título del bucle y une al sujeto
+  con \emph{otra} mención que comparta apellido, franquicia o lugar, y las
+  fechas rara vez lo impiden porque la mención secundaria no suele
+  traerlas. El resultado es una mezcla de uniones legítimas (\guillemotleft{}Ryan
+  Adams\guillemotright{} $\leftrightarrow$ \guillemotleft{}David Ryan Adams\guillemotright{}, el propio Lovecraft) y de
+  exactamente lo que la consigna del juez prohíbe: parientes
+  (\texttt{can:oskar roehler} lleva como alias a Klaus Roehler, su padre;
+  \guillemotleft{}Ermengarde\guillemotright{} $\leftrightarrow$ \guillemotleft{}Hugh of Tours\guillemotright{}), secuelas (\emph{Wrong
+  Turn 2/4/5} $\leftrightarrow$ \emph{Wrong Turn}) y personas con su empresa
+  (\guillemotleft{}Pietro Salini\guillemotright{} $\leftrightarrow$ \guillemotleft{}Salini Costruttori SpA\guillemotright{}). Ninguno de esos
+  pares pasó por el juez. Un segundo mecanismo de sobre-fusión, detectado
+  en la traza de la sección~\ref{sec:siembra}, es la banda automática por
+  nombre base idéntico cuando una de las formas lleva un desambiguador
+  entre paréntesis: la mención sintética de título \guillemotleft{}Christopher
+  Newton (criminal)\guillemotright{} no lleva fechas, su base sin paréntesis coincide
+  con \guillemotleft{}Christopher Newton\guillemotright{} y la restricción de fechas (1969 frente a
+  1936) no llega a actuar; título$\to$sujeto y el cierre transitivo hacen
+  el resto, y el asesino y el director teatral comparten entrada y pasaje
+  propio. El arreglo es que la ficha-título herede las fechas del sujeto
+  de su artículo y que un nombre base idéntico con desambiguador vaya a la
+  banda del juez. El arreglo previsto es no unir automáticamente en
+  el caso no sintético y enviar el par a la banda del modelo de lenguaje
+  (unos $200$ lotes), lo que exige regenerar diccionario, grafo y medición.
+\item \textbf{El canal contexto mide pasaje, no entidad}, y su tope de
+  vecinas se consume en parejas que luego se excluyen (véase el paso~2).
+  Un rediseño debería construir la descripción solo con las frases en que
+  la mención es sujeto u objeto y excluir el mismo pasaje \emph{antes} de
+  tomar las vecinas.
+\item \textbf{Infra-fusión residual.} Las variantes que ninguna semejanza
+  de superficie ni de contexto breve une ---alias translingües (\guillemotleft{}I'll Be
+  Going Now\guillemotright{} / \guillemotleft{}Tolgo il disturbo\guillemotright{}, sección~\ref{sec:falla-aun}),
+  transliteraciones, acrónimos--- quedan como islas ($10$ de $188$ en el
+  sondeo). Son el caso que una capa de identidad \emph{externa} resolvería.
+\item \textbf{Calidad de las fusiones sin medir.} Se conoce el impacto
+  del diccionario (tabla~\ref{tab:dicc-impacto}) pero no su precisión ni su
+  exhaustividad como resolutor de entidades. El conjunto de datos ofrece
+  un oro barato para medirlas: cada pregunta trae los identificadores
+  Wikidata de sus entidades (\texttt{entity\_ids}) y de los sujetos y
+  objetos de sus tripletes de evidencia (\texttt{evidences\_id}). Con ellos
+  se puede comprobar, sobre los entes de evidencia del banco, si menciones
+  del mismo QID caen en la misma entrada y las de QID distinto en entradas
+  distintas, sin etiquetado manual. Esa auditoría debe preceder a cualquier
+  decisión sobre cuánta curación adicional necesita el diccionario.
+\item \textbf{Alcance y generalización.} Conviene separar tres capas. El
+  \emph{patrón} ---ficha con contexto, dos canales, candidatos baratos,
+  restricciones duras, adjudicación por lotes con caché y cierre
+  transitivo--- es general y conservador, y es el mismo esqueleto del
+  enlazador terminológico del caso clínico (sección~\ref{sec:gesida-index}).
+  Lo que \emph{no} viaja es lo que da la mayor parte de la potencia en
+  2Wiki: el supuesto de que el título nombra al sujeto y de que cada
+  entidad tiene un artículo (de ahí el pasaje propio), y unas restricciones
+  duras propias de biografías enciclopédicas (fechas vitales, ordinales
+  nobiliarios). En un corpus sin esa estructura ---guías clínicas,
+  prensa--- solo quedan los canales vectoriales y el juez, cuyos umbrales
+  dependen además del codificador y del idioma ($0{,}80$ con
+  \texttt{text-embedding-3-small} en inglés no vale para otro modelo ni
+  para el español) y deben recalibrarse con una muestra etiquetada por
+  corpus. Cuando existe una terminología externa, el paso cambia de
+  naturaleza ---de \emph{agrupar menciones entre sí} a \emph{anclar
+  menciones a un concepto}--- y el diccionario derivado del corpus queda
+  como respaldo para lo que la terminología no cubre: en el asistente
+  GeSIDA, el $70\%$ de las entidades sin identificador SNOMED~CT.
+\end{enumerate}
+
+\subsubsection{La memoria canónica como artefacto}
+\label{sec:memoria}
+
+Los cuatro pasos anteriores producen un objeto concreto que conviene mirar
+por separado del procedimiento que lo construye, porque es lo que el resto
+del sistema consume: la \emph{memoria canónica} es el artefacto que queda
+entre la resolución de entidades y el grafo (figura~\ref{fig:pipeline}), y
+en la práctica son cuatro almacenes en \texttt{artifacts/wiki2/}. La
+figura~\ref{fig:memoria} los muestra con una entrada real
+---\texttt{can:robert a. stemmle}, el caso puente de la
+tabla~\ref{tab:dicc-cifras}--- y con quién usa cada pieza; la
+tabla~\ref{tab:memoria} resume el esquema.
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  font=\scriptsize,
+  alm/.style={draw, rounded corners=2pt, align=left, inner sep=3pt, fill=gray!8, text width=96mm},
+  cons/.style={draw, rounded corners=2pt, align=center, inner sep=3pt, text width=36mm},
+  fl/.style={-{Stealth[length=2mm]}, semithick},
+  node distance=3mm and 6mm]
+  \node[alm] (ent) {\textbf{Entradas canónicas} --- \texttt{entidades\_<split>.json}, $26\,960$ entradas\\[1pt]
+    {\tiny\color{black!80}
+     \texttt{id}: \texttt{can:robert a. stemmle} \quad \texttt{nombre}: Robert A. Stemmle \quad \texttt{menciones}: 3\\
+     \texttt{alias}: \{Robert A. Stemmle; Robert Adolf Stemmle\}\\
+     \texttt{descripción}: \guillemotleft{}Robert Adolf Stemmle was born on 10 June 1903 in Magdeburg
+     \dots\ was a German film director \dots\ directed 46 films between 1934 and 1970.
+     You Can No Longer Remain Silent was directed by Robert A Stemmle.\guillemotright{}\\
+     \texttt{pasajes}: \{Robert A. Stemmle; You Can No Longer Remain Silent\} \quad
+     \texttt{pasaje\_propio}: Robert A. Stemmle}};
+  \node[alm, below=of ent] (mapa) {\textbf{Mapa de menciones} --- \texttt{entidades\_mapa\_<split>.json},
+    $40\,276$ claves (pasaje$\,\|\,$forma) $\to$ id\\[1pt]
+    {\tiny\color{black!80}
+     \texttt{Robert A. Stemmle||robert a. stemmle} $\to$ \texttt{can:robert a. stemmle} (ficha-título)\\
+     \texttt{Robert A. Stemmle||robert adolf stemmle} $\to$ \texttt{can:robert a. stemmle} (título$\to$sujeto)\\
+     \texttt{You Can No Longer Remain Silent||robert a. stemmle}\\ \hspace*{1em}$\to$ \texttt{can:robert a. stemmle} (nombre exacto)}};
+  \node[alm, below=of mapa] (vec) {\textbf{Almacén vectorial} --- \texttt{emb\_fichas\_<split>.npz}, $26\,960 \times 1536$\\[1pt]
+    {\tiny\color{black!80} fila 861 $=$ $e(\cdot)$ de \guillemotleft{}Robert A. Stemmle (Robert A. Stemmle, Robert Adolf Stemmle)
+     --- Robert Adolf Stemmle was born on 10 June 1903 \dots\guillemotright{}}};
+  \node[alm, below=of vec] (cache) {\textbf{Caché del juez} --- \texttt{entidades\_cache.sqlite},
+    $12\,536$ pares (clave$_A$\,\#\#\,clave$_B$) $\to$ 0/1; solo interviene al reconstruir};
+  % ---- consumidores
+  \node[cons, right=of ent] (linker) {\textbf{Enlazador} (\S\ref{sec:linker})\\ escalón 1: tabla alias plegado $\to$ id;\\ escalón 2: vectores de ficha};
+  \node[cons, below=of linker] (siembra) {\textbf{Siembra} (\S\ref{sec:siembra})\\ el pasaje propio $\pi(\varepsilon)$ recibe masa de reinicio (ec.~\ref{eq:pasaje-propio})};
+  \node[cons, below=of siembra] (grafo) {\textbf{Grafo canónico} (\S\ref{sec:grafo})\\ un nodo por entrada; el mapa colapsa cada mención a su nodo};
+  \node[cons, below=of grafo] (anclas) {\textbf{Anclas débiles} (\S\ref{sec:siembra})\\ dos entradas por coseno con cada vector de consulta};
+  \draw[fl] (ent.east) -- (linker.west);
+  \draw[fl] (ent.east) -- (siembra.west);
+  \draw[fl] (mapa.east) -- (grafo.west);
+  \draw[fl] (vec.east) -- (linker.west);
+  \draw[fl] (vec.east) -- (anclas.west);
+  \begin{scope}[on background layer]
+    \node[fit=(ent)(cache), draw=gray!60, dashed, rounded corners=3pt, inner sep=4pt,
+          label={[gray, font=\scriptsize, anchor=south west]north west:{memoria canónica de entidades (artefacto de indexación)}}] {};
+  \end{scope}
+\end{tikzpicture}
+\caption{Anatomía de la memoria canónica construida sobre el corpus de
+evaluación, con la entrada real \texttt{can:robert a. stemmle}: el
+director aparece con las iniciales en el título de su biografía y con el
+nombre completo en el texto, y solo con las iniciales en el artículo de la
+película. La ficha-título y la forma completa se unen dentro de la
+biografía (título$\to$sujeto); la mención de la película se une por nombre
+exacto. A la derecha, quién consume cada almacén.}
+\label{fig:memoria}
+\end{figure}
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{Esquema de la memoria canónica: qué guarda cada campo y qué
+componente lo consume.}
+\label{tab:memoria}
+\begin{tabular}{l>{\raggedright\arraybackslash}p{0.44\textwidth}>{\raggedright\arraybackslash}p{0.30\textwidth}}
+\toprule
+campo / almacén & qué es & quién lo consume\\
+\midrule
+\texttt{id} & identificador estable \texttt{can:}$+$nombre plegado (sufijo \texttt{\#n} en colisiones) & grafo (nombre del nodo), mapa\\
+\texttt{nombre} & forma canónica; preferencia por la forma-título & enlazador (tabla de alias)\\
+\texttt{alias} & todas las formas del grupo más los títulos de sus pasajes propios & enlazador, escalón 1 (coincidencia exacta tras plegado)\\
+\texttt{descripción} & unión sin repetición de las descripciones de las fichas (hasta 600 car.) & solo a través del vector\\
+\texttt{pasajes} & pasajes donde aparece alguna mención del grupo & auditoría; no interviene en consulta\\
+\texttt{pasaje\_propio} & el artículo cuyo sujeto es la entidad, si existe & siembra (ec.~\ref{eq:pasaje-propio})\\
+\texttt{menciones} & número de fichas fundidas & señal para la auditoría\\
+mapa & (pasaje$\,\|\,$forma plegada) $\to$ \texttt{id}, una clave por ficha & constructor del grafo\\
+vectores & $e(\text{nombre (alias) --- descripción})$ por entrada & enlazador, escalón 2; anclas débiles\\
+caché del juez & veredicto 0/1 por par de claves & reconstrucción reproducible\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Cómo se consume.}
+La memoria interviene en tres momentos. Al \emph{construir el grafo}, el
+mapa colapsa las $40\,276$ menciones en $26\,960$ nodos-entidad: por eso
+el grafo canónico no necesita aristas de sinonimia. En \emph{consulta}, el
+enlazador busca cada tramo de la pregunta en la tabla de alias (una
+consulta exacta de tabla, sin vectores) y, si falla, contra los vectores
+de ficha; y la siembra deposita masa de reinicio en el pasaje propio de
+cada entidad enlazada o aprobada por el filtro. En la traza de la
+sección~\ref{sec:traza}, \guillemotleft{}Atomised\guillemotright{} resuelve por alias exacto a
+\texttt{can:atomised} y el pasaje propio de \texttt{can:oskar roehler}
+---descubierto por el filtro--- es lo que convierte la biografía del
+director en semilla.
+
+\paragraph{Ciclo de vida actual.}
+Conviene decirlo con claridad: en la versión evaluada la memoria es
+\emph{enteramente automática} y se regenera de cero en cada ejecución.
+Tiene tres carencias que la instrumentación de la
+sección~\ref{sec:diccionario} ha hecho visibles. No guarda
+\emph{procedencia}: una vez que la estructura unión--búsqueda funde dos
+fichas, nadie sabe si el alias entró por nombre exacto, por el juez o por
+la heurística de título ---y así es como el alias \guillemotleft{}Klaus Roehler\guillemotright{} pudo
+entrar en la entrada de su hijo sin que nada lo señalara---. No tiene
+\emph{estado}: no distingue una entrada automática de una auditada o
+curada. Y no tiene \emph{ciclo de vida}: una corrección manual no
+sobreviviría a la siguiente reconstrucción. Una consecuencia práctica: el
+enlazador construye la tabla de alias por orden de carga, de modo que en
+las $36$ colisiones (y en cualquier alias compartido) gana la entrada que
+se leyó primero. En el asistente clínico (sección~\ref{sec:gesida-index})
+los anclajes terminológicos sí tienen bandeja de revisión con estados
+(pendiente, curado, rechazado, sin anclar), registro de cada decisión y
+escrituras atómicas; ese es el patrón que se reutilizaría.
+
+\paragraph{Ciclo de curación previsto.}
+La figura~\ref{fig:curacion} resume el diseño. La idea central es que
+nadie va a revisar $27\,000$ entradas: la memoria tiene que \emph{señalar}
+las que lo merecen, un juez las re-adjudica con más contexto, un humano
+ve solo lo dudoso, y cada decisión se registra de forma que la siguiente
+reconstrucción la respete. Lo que se cura, y cómo:
+\begin{itemize}[leftmargin=1.4em, itemsep=1pt]
+\item \emph{Alias}: cada alias pasa de cadena a objeto con origen (exacto,
+  automático, juez, título, manual), evidencia (cosenos, veredicto) y
+  estado (automático, confirmado, dudoso, rechazado). El enlazador solo usa
+  los no rechazados.
+\item \emph{Descripciones}: se regeneran de forma determinista a partir de
+  las aserciones del pasaje propio (primero las de rol sujeto: nacimiento,
+  muerte, ocupación, obras), guardando el identificador de cada frase para
+  que sean auditables; admiten sobreescritura manual, que fuerza a
+  recalcular el vector.
+\item \emph{Pasaje propio y colisiones}: un grupo con dos fichas-título de
+  pasajes distintos es sospechoso de haber fundido dos artículos; una
+  colisión se marca como ambigüedad explícita para que el enlazador
+  desambigüe (por coseno de la ficha con la pregunta) en lugar de elegir
+  por orden de carga.
+\item \emph{Identidad externa}: un campo para el identificador Wikidata
+  (QID) aquí y SNOMED~CT (SCTID) en el caso clínico, que es a la vez oro
+  de auditoría y la única vía para los alias que ninguna semejanza
+  superficial une.
+\item \emph{Decisiones como restricciones}: una curación se guarda como
+  par \emph{forzado} o \emph{prohibido} entre claves de mención
+  (pasaje$\,\|\,$forma), más las sobreescrituras de alias y descripción, y
+  se aplica \emph{antes} del cierre transitivo en la siguiente
+  reconstrucción. Así la regeneración es determinista (pasada automática
+  $+$ decisiones), \guillemotleft{}separar $A$ de $B$\guillemotright{} impide que el cierre los vuelva a
+  unir por otro camino, y las decisiones sobreviven a una re-extracción
+  porque la clave es estable.
+\end{itemize}
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[
+  font=\scriptsize,
+  hecho/.style={draw, rounded corners=2pt, align=center, inner sep=3pt, fill=gray!8, text width=34mm},
+  prev/.style={draw, densely dotted, rounded corners=2pt, align=center, inner sep=3pt, text width=34mm},
+  dato/.style={draw, dashed, rounded corners=2pt, align=center, inner sep=3pt, text width=34mm},
+  fl/.style={-{Stealth[length=2mm]}, semithick},
+  et/.style={font=\tiny, fill=white, inner sep=1pt},
+  node distance=6mm and 5mm]
+  \node[hecho] (mem) {\textbf{Memoria canónica $v_n$}\\ entradas, alias, descripciones, mapa, vectores\\ (hoy: pasada automática de \S\ref{sec:diccionario})};
+  \node[prev, right=of mem] (sen) {\textbf{Señales}\\ oro externo (QID); unión de título no sintética; apellido igual con nombre distinto; sufijo de empresa; secuelas; alias que es título de otro pasaje; colisiones};
+  \node[prev, right=of sen] (juez) {\textbf{Re-adjudicación}\\ juez LLM con la consigna estricta y las primeras frases de ambos pasajes; lotes de 8 con caché};
+  \node[prev, right=of juez] (band) {\textbf{Bandeja humana} (opcional)\\ solo dudosos y conflictos con el oro; estados y registro como en el caso clínico};
+  \node[prev, below=of band] (dec) {\textbf{Decisiones registradas}\\ pares forzados / prohibidos entre claves (pasaje$\,\|\,$forma); alias y descripciones sobreescritos; identidad externa};
+  \node[prev, below=of juez] (regen) {\textbf{Regeneración determinista}\\ pasada automática $+$ decisiones \emph{antes} del cierre; se rehacen solo descripciones, vectores y nodos de las entradas tocadas};
+  \node[dato, below=of mem] (cons) {\textbf{Consumidores}\\ grafo canónico (\S\ref{sec:grafo}); enlazador (\S\ref{sec:linker}); siembra por pasaje propio (\S\ref{sec:siembra})};
+  \draw[fl] (mem) -- (sen);
+  \draw[fl] (sen) -- (juez);
+  \draw[fl] (juez) -- (band);
+  \draw[fl] (band) -- (dec);
+  \draw[fl] (dec) -- (regen);
+  \draw[fl] (regen.west) -| node[et, pos=0.75, left]{$v_{n+1}$} (sen.south);
+  \draw[fl] (mem) -- (cons);
+\end{tikzpicture}
+\caption{Ciclo de curación previsto para la memoria canónica. Las cajas
+rellenas existen en la versión evaluada; las punteadas son diseño. La
+memoria señala las entradas sospechosas, el juez las re-adjudica, un
+revisor ve solo lo dudoso, y las decisiones se guardan como restricciones
+sobre claves de mención que la siguiente reconstrucción aplica antes del
+cierre transitivo, de modo que la memoria $v_{n+1}$ es reproducible y las
+correcciones no se pierden.}
+\label{fig:curacion}
+\end{figure}
+
+\paragraph{Pipeline de evoluciones de la memoria canónica.}
+Reunimos aquí, ordenadas por valor esperado frente a esfuerzo, todas las
+evoluciones que el análisis de este apartado y del anterior deja
+planteadas. Cada una se validaría primero en el sondeo y se mediría una
+sola vez sobre el banco, como el resto del sistema
+(sección~\ref{sec:protocolo}); ninguna está implementada en la versión
+evaluada.
+\begin{enumerate}[leftmargin=1.8em, itemsep=1pt, label=E\arabic*.]
+\item \textbf{Auditoría con oro externo.} Medir precisión y exhaustividad
+  de las fusiones con los identificadores Wikidata del propio conjunto de
+  datos (\texttt{entity\_ids}, \texttt{evidences\_id}): mismo QID en
+  entradas distintas es infra-fusión; QID distintos en la misma entrada,
+  sobre-fusión. Sin coste de API. Es la primera porque decide el alcance de
+  todas las demás (limitación~4 de la sección~\ref{sec:diccionario}).
+\item \textbf{Procedencia y señales en el esquema.} Registrar en la
+  consolidación el origen de cada unión (la información existe en el
+  proceso; hoy se pierde al fundir), convertir los alias en objetos con
+  origen, evidencia y estado, y calcular las señales estructurales de la
+  figura~\ref{fig:curacion}. No cambia ningún resultado; hace la memoria
+  auditable.
+\item \textbf{Decisiones registradas y regeneración determinista.} Pares
+  forzados y prohibidos sobre claves de mención, sobreescrituras de alias y
+  descripción, aplicadas antes del cierre transitivo; reconstrucción
+  incremental de las entradas tocadas.
+\item \textbf{Re-adjudicación de las uniones señaladas y re-medición.}
+  Enviar al juez las $1\,549$ uniones de título fuera de su caso previsto
+  y el resto de señales (unos $250$ lotes, céntimos), regenerar
+  diccionario, grafo y vectores, y medir sobre el banco (${\approx}$1--2
+  USD; cuenta como una configuración más). Es el arreglo de la
+  limitación~1 hecho como curación registrada, no como otro parche
+  heurístico.
+\item \textbf{Candidatos por umbral, no por tope.} Pre-agrupar por nombre
+  plegado exacto con tabla de dispersión ($40\,276$ fichas $\to$ $30\,812$
+  formas; $4\,530$ en dos o más pasajes) manteniendo las restricciones
+  duras; aplicar los umbrales a la fila completa de cosenos excluyendo
+  antes el mismo pasaje; limitar por ficha solo la banda del juez, que es
+  la que tiene coste.
+\item \textbf{Canal contexto que mida entidad y no pasaje.} Construir la
+  descripción solo con las frases en que la mención es sujeto u objeto y
+  excluir las fichas del mismo pasaje antes de tomar las vecinas
+  (limitación~2).
+\item \textbf{Enlazador consciente de colisiones.} La memoria expone la
+  ambigüedad (varias entradas por alias) y el enlazador desambigua por
+  coseno de la ficha con la pregunta, o siembra ambas con peso repartido,
+  en lugar de elegir por orden de carga.
+\item \textbf{Capa de identidad externa.} Resolución título $\to$ QID
+  contra Wikidata, cacheada, como identidad primaria de la entrada: es la
+  única vía para los alias translingües y las transliteraciones
+  (limitación~3), y el equivalente exacto del SCTID clínico.
+\item \textbf{Bandeja de curación unificada.} Reutilizar la bandeja del
+  asistente clínico (estados, registro de decisiones, escrituras atómicas)
+  para ambas memorias, solo donde vaya a haber un revisor; y, en sentido
+  inverso, llevar al caso clínico el diccionario derivado del corpus como
+  respaldo para el $70\%$ de entidades sin SCTID (limitación~5).
+\end{enumerate}
 
 \subsubsection{Grafo canónico y grafo de búsqueda}
 \label{sec:grafo}
@@ -655,8 +1593,9 @@ distancia de edición (SymSpell, Levenshtein) en ningún punto del sistema
 evaluado: las variantes de superficie que una distancia de edición
 capturaría (\guillemotleft{}H.\,P.\guillemotright{} frente a \guillemotleft{}Howard Phillips\guillemotright{}) quedan resueltas
 \emph{en indexación} por la fusión canónica, y las que no lo están
-(erratas del usuario, formas nunca vistas) las absorbe el escalón
-vectorial. Merece la pena distinguir los tres regímenes de sinonimia que
+(erratas del usuario, formas nunca vistas) deberían absorberlas el
+escalón vectorial ---aunque, medido sobre el banco, ese escalón apenas se
+activa en la versión evaluada (sección~\ref{sec:linker})---. Merece la pena distinguir los tres regímenes de sinonimia que
 conviven en este trabajo: (i)~la variante \emph{no canónica} del grafo
 (usada en la versión v2 y conservada como ablación) resuelve en
 \emph{consulta} con aristas \textsc{sinonimo\_de} por umbral de coseno
@@ -699,6 +1638,44 @@ del encadenamiento entre etapas. Al final de cada etapa, una nota
 \guillemotleft{}en el ejemplo\guillemotright{} registra qué produjo y qué entrega a la siguiente;
 la sección~\ref{sec:traza} recorre después, con el mismo detalle, un caso
 composicional.
+
+\paragraph{Qué depende de qué.}
+Las etapas no forman una cadena lineal sino un grafo de dependencias con
+dos ramas independientes (figura~\ref{fig:pipeline} y
+tabla~\ref{tab:dependencias}). El enrutador solo lee la pregunta y decide
+la estrategia. A partir de ahí, la rama \emph{simbólica} ---el enlazador,
+que consulta el diccionario--- y la rama \emph{semántica} ---los vectores
+de consulta y la afinidad, que consultan el almacén de aserciones---
+consumen únicamente la pregunta y son independientes entre sí: ninguna
+usa la salida de la otra, y pueden ejecutarse en cualquier orden o en
+paralelo. Convergen en el filtro, la primera etapa que necesita las dos:
+su lista de candidatos $\mathcal{K}(q)$ se compone del Top-40 por
+$\sigma$ (rama semántica) y de la frontera de $L(q)$ (rama simbólica).
+La siembra es la única etapa que recibe los tres productos ---$L(q)$;
+$\{v_j\}$ con $\sigma$; y $(S(q),\tilde\sigma)$--- y el paseo recibe la
+siembra y $\tilde\sigma$. En la estrategia de descomposición el filtro no
+corre, $\tilde\sigma=\sigma$, y la siembra recibe directamente los
+productos de las dos ramas.
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{3.5pt}
+\caption{Dependencias entre las etapas de consulta: qué consume y qué
+produce cada una, y quién consume su producto. Enlazador y afinidad son
+independientes; el filtro es la primera etapa que necesita ambas.}
+\label{tab:dependencias}
+\begin{tabular}{lp{0.30\textwidth}p{0.17\textwidth}p{0.33\textwidth}}
+\toprule
+etapa & consume & produce & quién lo consume\\
+\midrule
+enrutador & la pregunta & estrategia & afinidad (?`descomponer?), filtro (?`corre?)\\
+enlazador & la pregunta, la memoria canónica (alias, fichas) & $L(q)$ & filtro (frontera); siembra (anclas fuertes, pasaje propio)\\
+afinidad & la pregunta, el almacén de aserciones & $\{v_j\}$, $\sigma$ & filtro (Top-40); siembra (compuerta, presa densa con $v_0$, anclas débiles); paseo ($\mu$, si no hay filtro)\\
+filtro & $\mathcal{K}(q)=\op{Top}_{40}(\sigma)\cup\op{frontera}(L(q))$ & $S(q)$, $\tilde\sigma$ & siembra (compuerta dura); paseo ($\mu$)\\
+siembra & $L(q)$; $\{v_j\}$; $(S(q),\tilde\sigma)$; pasaje propio de la memoria & $\mathbf{v}$ & paseo\\
+paseo & $\mathbf{v}$, $\tilde\sigma$, el grafo $G^{\!\rightarrow}$ & orden de pasajes & ---\\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsubsection{Enrutador léxico de intención}
 \label{sec:router}
@@ -823,6 +1800,31 @@ que ambos escalones devuelven siempre una entrada \emph{canónica}: lo que
 cambia entre ellos es el mecanismo de búsqueda (tabla exacta frente a
 vecindad vectorial), no el espacio sobre el que se busca.
 
+\paragraph{Medición del escalón 2 sobre el banco.}
+Instrumentando el enlazador sobre las $1\,000$ preguntas, el recorte
+produce $1\,534$ tramos: $1\,259$ ($82\%$) resuelven por alias exacto y
+$275$ ($18\%$) llegan al escalón 2. De estos, el umbral $0{,}80$ acepta
+\textbf{tres} (coseno máximo observado $0{,}850$; mediana $0{,}61$). En
+la práctica, por tanto, el respaldo vectorial está \emph{inactivo} en la
+versión evaluada, y las preguntas afectadas las sostienen el Top-40 del
+filtro y la presa densa. La señal, sin embargo, apunta bien: la ficha más
+afín pertenece a un pasaje oro en $216$ de los $275$ casos ($79\%$). Las
+causas son dos y distintas. La primera es el \emph{recorte}: el artículo
+inicial se pierde porque \guillemotleft{}the\guillemotright{}, \guillemotleft{}a\guillemotright{} y \guillemotleft{}an\guillemotright{} figuran en el
+vocabulario interrogativo que la regla de mayúsculas excluye
+(\guillemotleft{}The Goose Woman\guillemotright{} $\to$ \guillemotleft{}Goose Woman\guillemotright{}; $120$ de los $275$ tramos
+casarían por alias exacto con su artículo), y los dos puntos, la \guillemotleft{}A\guillemotright{}
+interior y la coordinación parten títulos (\guillemotleft{}Gaby: A True Story\guillemotright{}
+$\to$ \guillemotleft{}Gaby\guillemotright{} $+$ \guillemotleft{}True Story\guillemotright{}; \guillemotleft{}Interview With A Hitman\guillemotright{}
+$\to$ \guillemotleft{}Interview With\guillemotright{} $+$ \guillemotleft{}Hitman\guillemotright{}). La segunda es el
+\emph{objeto de comparación}: un nombre suelto contra una ficha que lleva
+$300$ caracteres de descripción rara vez alcanza $0{,}80$. El tramo
+\guillemotleft{}Goose Woman\guillemotright{} contra la ficha \guillemotleft{}The Goose Woman (The Goose Woman)
+--- The Goose Woman is a 1925 silent film drama directed by Clarence
+Brown\dots\guillemotright{} da $0{,}657$ (rechazado, siendo la ficha correcta); el mismo
+tramo contra la incrustación del \emph{nombre solo} \guillemotleft{}The Goose
+Woman\guillemotright{} da $0{,}933$.
+
 \paragraph{Qué es denso aquí y qué no.}
 Conviene no confundir este respaldo vectorial con la recuperación densa
 clásica. El enlazador ancla \emph{entidades}: su espacio son las $26\,960$
@@ -831,14 +1833,98 @@ densa} de la siembra (fuente~b de la sección~\ref{sec:siembra}) es otro
 mecanismo, posterior e independiente: puntúa \emph{pasajes} (los $6\,119$
 vectores de título$+$texto) contra la pregunta \emph{entera}, corre
 siempre y para todos los pasajes, y aporta masa con peso pequeño
-($0{,}05$). En la práctica, el eslabón débil medido del enlazador no es la
-comparación vectorial sino el \emph{recorte} del tramo: en el estudio de
+($0{,}05$). En la práctica, los dos eslabones débiles medidos del
+enlazador son el \emph{recorte} del tramo y el \emph{objeto} contra el
+que se compara (párrafo anterior), no la densidad: en el estudio de
 errores retenido, los fallos atribuibles al enlazador ($3$ de $15$)
 nacieron de tramos rotos por la regla de mayúsculas (\guillemotleft{}Magician
-(1958\guillemotright{}), que tampoco alcanzan el umbral contra la ficha correcta; de ahí
-que la mejora prevista sea sustituir la detección de tramos por
-reconocimiento de entidades con modelo de lenguaje
-(sección~\ref{sec:falla-aun}), no añadir más densidad.
+(1958\guillemotright{}), que tampoco alcanzan el umbral contra la ficha correcta. De ahí
+que las evoluciones previstas (párrafo siguiente) sean sustituir la
+detección de tramos por reconocimiento de entidades y comparar de nombre
+a nombre, no añadir más densidad.
+
+\paragraph{Evoluciones del enlazador.}
+Las alternativas para el escalón 2 se han medido sobre los mismos $275$
+tramos con dos criterios: si el mejor candidato pertenece a un pasaje oro
+(calidad del \emph{señalador}) y cuántos aciertos y errores produce un
+umbral de aceptación (calidad del \emph{decisor});
+la tabla~\ref{tab:enlazador-alt} las resume. Tres conclusiones. Primera,
+el problema no es de tipografía sino de \emph{truncamiento}: la distancia
+de edición al estilo SymSpell (distancia absoluta $\le 2$) acepta $78$
+tramos y acierta $33$ ---\guillemotleft{}Gaby\guillemotright{} $\to$ \guillemotleft{}Gabby\guillemotright{}---, porque un
+artículo o una palabra perdidos distan cuatro o más caracteres de la
+forma correcta; es la herramienta equivocada para este fallo. Segunda,
+BM25 sobre los alias es el mejor señalador ($227$ de $275$ con el oro en
+primer lugar) pero un mal decisor: su puntuación no acota bien la
+aceptación ($167$ correctos frente a $27$ erróneos al $0{,}8$ de su
+máximo posible, porque premia coincidencias parciales como \guillemotleft{}Gaby\guillemotright{}
+$\to$ \guillemotleft{}Gaby Brimer\guillemotright{}); y como sustituto del escalón 1 no aporta nada:
+coincide con el alias exacto en $1\,239$ de los $1\,259$ tramos resueltos,
+y las $20$ discrepancias son tramos con paréntesis roto (\guillemotleft{}Possession
+(1922\guillemotright{}) en los que BM25 casa con el año. Tercera, las dos medidas de
+semejanza \emph{de nombre a nombre} ---el coeficiente de Dice sobre
+trigramas de caracteres, el mismo escalón difuso del enlazador clínico
+(sección~\ref{sec:gesida-index}), y el coseno contra la incrustación del
+nombre solo--- son las que rinden, y se complementan: la léxica captura
+truncamientos y erratas sin coste; la vectorial, variantes que no
+comparten superficie. Su unión (Dice $\ge 0{,}80$ o coseno de nombre
+$\ge 0{,}85$) enlaza $187$ de los $275$ tramos con $179$ aciertos y $8$
+errores, frente a los $3$ de la versión evaluada; los errores son
+casi-homónimos (\guillemotleft{}Two Brides\guillemotright{} $\to$ \guillemotleft{}The Two Brides\guillemotright{} cuando el
+oro es \emph{Two Brides and a Baby}) que la ficha con descripción puede
+desempatar. De los $88$ que quedan sin enlazar, $79$ son tramos rotos de
+una o dos palabras (\guillemotleft{}Hitman\guillemotright{}, \guillemotleft{}True Story\guillemotright{}, \guillemotleft{}Dr\guillemotright{}): ninguna
+medida de semejanza los rescata, porque el error está antes. Con esto,
+las evoluciones previstas, en orden:
+\begin{enumerate}[leftmargin=1.8em, itemsep=1pt, label=L\arabic*.]
+\item \textbf{Reconocimiento de entidades sobre la pregunta} en lugar del
+  recorte por mayúsculas: un modelo de lenguaje (una llamada por
+  consulta, como hacen HippoRAG y CatRAG; sección~\ref{sec:palancas}) o
+  un reconocedor local sin coste de API. Es la única corrección general
+  del recorte ---artículos, dos puntos, coordinación, paréntesis--- y
+  ataca los $79$ tramos rotos. Un parche de prefijos (reintentar el alias
+  anteponiendo \guillemotleft{}the\guillemotright{}) resolvería $168$ de los $275$ tramos en este
+  banco, pero es específico del inglés y de los títulos enciclopédicos, y
+  se descarta por no generalizable.
+\item \textbf{Escalón 2 de nombre a nombre}: Dice sobre trigramas
+  $\ge 0{,}80$ o coseno de nombre $\ge 0{,}85$ contra los $31\,837$ alias,
+  con la ficha con descripción como desempate entre alias casi iguales
+  de entradas distintas. Con ello el enlazador converge con el clínico
+  (exacto $\to$ trigramas $\to$ vector $\to$ juez) y el umbral deja de
+  depender de la longitud de la descripción.
+\item \textbf{BM25 solo como generador de candidatos}: los $k$ mejores
+  alias para el desempate o para un juez, nunca como criterio de
+  aceptación.
+\item \textbf{Enlazador consciente de colisiones} (E7 de la
+  sección~\ref{sec:memoria}).
+\end{enumerate}
+Cada una se validará en el sondeo y se medirá una sola vez en el banco.
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{3.5pt}
+\caption{Alternativas para el escalón 2 del enlazador, medidas sobre los
+$275$ tramos del banco que no casan por alias exacto. \guillemotleft{}Oro en
+1.\textsuperscript{o}\guillemotright{}: el mejor candidato pertenece a un pasaje oro.
+Entre paréntesis, correctos\,/\,erróneos entre los aceptados. Ninguna
+alternativa está en la versión evaluada.}
+\label{tab:enlazador-alt}
+\scriptsize\setlength{\tabcolsep}{3pt}
+\begin{tabular}{llccrl}
+\toprule
+método & objeto comparado & oro en 1.\textsuperscript{o} & aceptación & acepta & coste\\
+\midrule
+coseno contra ficha (evaluado) & nombre (alias) --- descripción & $216$ & $\ge 0{,}80$ & $3$ ($3/0$) & 1 incr.\\
+ídem, umbral rebajado & nombre (alias) --- descripción & $216$ & $\ge 0{,}70$ & $43$ ($42/1$) & 1 incr.\\
+coseno contra nombre solo & alias & $222$ & $\ge 0{,}85$ & $152$ ($146/6$) & 1 incr.\\
+Dice sobre trigramas & alias plegado & $222$ & $\ge 0{,}80$ & $180$ ($174/6$) & 0\\
+BM25 & alias tokenizado & $227$ & $\ge 0{,}8$ del máx. & $194$ ($167/27$) & 0\\
+edición absoluta (SymSpell) & alias plegado & $167$ & $\le 2$ & $78$ ($33/45$) & 0\\
+edición normalizada & alias plegado & $167$ & $\ge 0{,}80$ & $105$ ($90/15$) & 0\\
+\midrule
+unión: Dice $\ge 0{,}80$ $\vee$ cos.\ nombre $\ge 0{,}85$ & alias & --- & --- & $187$ ($179/8$) & 1 incr.\\
+\bottomrule
+\end{tabular}
+\end{table}
 
 El resultado de la etapa es el conjunto de entidades enlazadas
 $L(q) \subseteq \mathcal{E}$, que alimenta tres mecanismos: los candidatos
@@ -869,6 +1955,30 @@ consulta es el mejor coseno sobre los vectores:
 \label{eq:afinidad}
 \end{equation}
 
+\paragraph{Qué es $J$ y por qué el máximo.}
+$J$ es el número de vectores de consulta \emph{adicionales}: $v_0$ existe
+siempre y, en la estrategia de descomposición, cada subconsulta aporta
+uno más. Una pregunta real de comparación del banco lo muestra: para
+\guillemotleft{}\emph{Are Christopher Newton (Criminal) and Frances M. Vega of the
+same nationality?}\guillemotright{} (oro: las dos biografías) el modelo devolvió tres
+subconsultas ---\guillemotleft{}What is the nationality of Christopher Newton?\guillemotright{},
+\guillemotleft{}What is the nationality of Frances M. Vega?\guillemotright{} y \guillemotleft{}Are the
+nationalities of Christopher Newton and Frances M. Vega the same?\guillemotright{}---,
+luego $J=3$ y cuatro vectores. La pregunta entera, $v_0$, mezcla las dos
+ramas y puntúa flojo: su mejor hecho, \guillemotleft{}Frances Marie Vega was of
+Puerto Rican descent\guillemotright{}, queda a $0{,}525$ y el mejor de Newton a
+$0{,}513$. Cada subconsulta puntúa \emph{su} rama con nitidez ($v_1$: los
+hechos de Newton a $0{,}69$; $v_2$: los de Vega a $0{,}73$). Con el
+máximo de la ecuación~\eqref{eq:afinidad}, los ocho hechos de mayor
+$\sigma$ salen alternando ramas ---cinco de Vega por $v_2$, tres de
+Newton por $v_1$--- en lugar de que la rama léxicamente dominante deje
+sin candidatos a la otra. La tercera subconsulta, redundante con $v_0$,
+no gana el máximo en ningún hecho relevante: una subconsulta inútil no
+cuesta nada. En esta estrategia no corre el filtro
+(sección~\ref{sec:router}), de modo que $\tilde\sigma=\sigma$ y la
+siembra usa la compuerta blanda; la sección~\ref{sec:siembra} desglosa
+el vector de siembra que resulta de esta misma pregunta.
+
 \emph{En el ejemplo conductor} (estrategia de filtro: $J=0$, un solo
 vector): el máximo de $\sigma$ lo alcanza el hecho puente de la primera
 película, \guillemotleft{}God's Gift to Women was directed by Michael Curtiz\guillemotright{}
@@ -898,10 +2008,43 @@ sobre una lista corta de candidatos. La lista combina dos fuentes:
 \op{Top}_{15}\bigl\{\sigma_a : a \ni \varepsilon\bigr\}}_{\text{frontera de las entidades enlazadas}},
 \label{eq:candidatos}
 \end{equation}
-con un tope de $20$ hechos añadidos por la frontera. La frontera es
-decisiva en preguntas largas: el hecho puente de una entidad enlazada entra
-en la lista \emph{por estructura del grafo} aunque su coseno no lo sitúe en
-el Top-40.
+donde la \emph{frontera} de una entidad enlazada $\varepsilon$ es el
+conjunto de hechos que inciden en ella en el grafo canónico ---las
+aserciones de las que $\varepsilon$ es sujeto, objeto o participante,
+es decir, sus vecinos a una arista en $G^{\!\rightarrow}$---, de los que
+se toman los $15$ de mayor $\sigma$. La lista es una \emph{unión}, no
+una intersección: al Top-40 se le añaden los hechos de frontera que aún
+no estaban en él, sin duplicar y con un tope de $20$ añadidos en total.
+Las dos fuentes son de naturaleza distinta, y por eso se suman: el
+Top-40 selecciona por \emph{semejanza con la pregunta} entre los
+$47\,999$ hechos, sin mirar el grafo; la frontera selecciona por
+\emph{estructura} ---qué afirma el corpus sobre las entidades que la
+pregunta nombra---, y el coseno solo ordena dentro de cada entidad. La
+frontera garantiza que el hecho puente de una entidad enlazada llegue al
+filtro aunque esté verbalizado sin el vocabulario de la pregunta.
+
+\emph{Medido sobre el banco} (tomando como hecho oro toda aserción de un
+pasaje oro que solapa al menos el $60\%$ de los términos de un triplete
+de evidencia; $966$ preguntas tienen alguno): $|\mathcal{K}(q)|$ vale
+$41{,}4$ de media, es decir, la frontera añade $1{,}4$ hechos nuevos por
+pregunta; el Top-40 ya contiene algún hecho oro en $944$ preguntas; la
+frontera aporta un hecho oro de primer salto que el Top-40 no tenía en
+$51$ ($5\%$: $22$ composicionales, $15$ de comparación-puente, $10$ de
+inferencia, $4$ de comparación), y solo en $19$ preguntas $\mathcal{K}(q)$
+no contiene ningún hecho oro. De los $3\,371$ hechos oro que inciden en
+una entidad enlazada, el $88\%$ está en el Top-40, el $2{,}5\%$ entra por
+la frontera y el $9\%$ queda fuera de $\mathcal{K}(q)$ (entidades con más
+de $15$ hechos, o sin enlazar: $74$ preguntas no enlazan ninguna
+entidad). La frontera es, por tanto, una red de seguridad estructural
+de coste cero, útil en una minoría medible, no el mecanismo principal.
+En el ejemplo conductor, la frontera de \texttt{can:aldri annet enn
+bråk} son sus $7$ hechos incidentes, cinco de ellos fuera del Top-40
+(rangos $114$ a $1\,416$ por coseno: \guillemotleft{}was edited by Edith
+Carlmar\guillemotright{}, \guillemotleft{}A 1955 Danish remake\dots\guillemotright{}); el hecho puente de esa
+rama ya estaba en el Top-40 (rango $5$), de modo que allí la frontera
+amplía el contexto del juez pero no decide. En la traza de la
+sección~\ref{sec:traza} ocurre lo mismo: $8$ hechos nuevos de
+\texttt{can:atomised}, con el puente en rango $1$.
 
 El filtro recibe la pregunta y las frases $\tau_a$ numeradas y devuelve una
 selección $S(q) \subseteq \mathcal{K}(q)$ con $|S(q)| \le 4$. La consigna,
@@ -924,8 +2067,10 @@ selección define la afinidad corregida
 \end{equation}
 
 \emph{En el ejemplo conductor}: la lista de candidatos $\mathcal{K}(q)$
-reúne el Top-40 por coseno y las $16$ aserciones de frontera de las dos
-películas enlazadas. El filtro selecciona tres hechos:
+reúne el Top-40 por coseno y los $16$ hechos de frontera de las dos
+películas enlazadas ($9$ de una, $7$ de la otra), de los que $7$ no
+estaban en el Top-40: $47$ candidatos numerados. El filtro selecciona
+tres hechos:
 \begin{center}\small
 \begin{tabular}{lll}
 \toprule
@@ -1035,6 +2180,190 @@ convierte ese descubrimiento en masa sobre sus artículos ---los pasajes
 del segundo salto--- sin esperar al paseo. \texttt{can:norway} no tiene
 pasaje propio en el corpus, así que su siembra solo podrá diluirse. La
 etapa entrega el vector $\mathbf{v}$ normalizado.
+
+\paragraph{De los tres productos al vector, paso a paso.}
+La siembra no ve la pregunta: ve tres productos de las etapas anteriores.
+Conviene fijar qué es cada uno y cómo se produjo en la pregunta de
+comparación de la sección~\ref{sec:afinidad}, antes de recorrer el
+algoritmo sobre ella.
+\begin{description}[leftmargin=1.6em, itemsep=1pt, style=unboxed]
+\item[P1, del enlazador (\S\ref{sec:linker}): $L(q)$.] La regla de
+  mayúsculas produce un único tramo, \guillemotleft{}Christopher Newton (Criminal)
+  and Frances M Vega\guillemotright{}; como no es alias, se parte por la coordinación
+  en dos; cada mitad se pliega (minúsculas, sin paréntesis ni
+  puntuación: \guillemotleft{}christopher newton\guillemotright{}, \guillemotleft{}frances m vega\guillemotright{}) y casa en
+  la tabla de alias, sin respaldo vectorial:
+  $L(q)=\{\texttt{can:christopher newton},\ \texttt{can:frances m.
+  vega}\}$. Obsérvese que el plegado descarta el desambiguador
+  \guillemotleft{}(Criminal)\guillemotright{}: aunque el diccionario tuviera dos entradas, el
+  enlazador no podría distinguirlas (evolución L4).
+\item[P2, de la afinidad (\S\ref{sec:afinidad}): $\{v_j\}$ y $\sigma$.]
+  Cuatro vectores ($v_0$ más las tres subconsultas) y, para cada uno de
+  los $47\,999$ hechos, $\sigma_a=\max_j\langle v_j,e(\tau_a)\rangle$,
+  con mínimo $-0{,}074$ y máximo $0{,}730$.
+\item[P3, del filtro (\S\ref{sec:filtro}): $S(q)$ y $\tilde\sigma$.] En
+  la estrategia de descomposición el filtro no corre: $S(q)$ está vacío,
+  $\tilde\sigma=\sigma$ y la fuente~(a) usa la compuerta blanda. (En la
+  estrategia de filtro, $S(q)$ son los hechos aprobados y
+  $\tilde\sigma_a=1$ para ellos; el ejemplo conductor recorre ese caso.)
+\end{description}
+Con esos tres productos, $\mathbf{v}$ se construye en cuatro pasos y una
+normalización:
+\begin{enumerate}[leftmargin=1.6em, itemsep=2pt]
+\item \textbf{Hechos $\to$ entidades (fuente~a, compuerta blanda).} Se
+  normaliza $\sigma$ al rango $[0,1]$,
+  $n_a=(\sigma_a-\min\sigma)/(\max\sigma-\min\sigma)$, y se toman los
+  $15$ hechos de mayor $\sigma$ (tabla~\ref{tab:siembra-pasos}). Cada
+  entidad participante acumula $n_a/\op{frec}(\varepsilon)$ por hecho,
+  donde $\op{frec}$ es el número de pasajes que la mencionan, y su peso
+  es la media sobre sus hechos. Así, \texttt{can:frances m. vega} suma
+  $3{,}817$ en $4$ hechos $\to 0{,}954$; \texttt{can:david newton} suma
+  $4{,}403$ en $5$ $\to 0{,}881$; \texttt{can:christopher newton} suma
+  $2{,}706$ en $6$ hechos, pero cada aportación va dividida por su
+  frecuencia $2$ $\to 0{,}451$; los lugares entran por un solo hecho
+  (\texttt{oakland} $0{,}294$, \texttt{north carolina} $0{,}127$), y
+  \texttt{california} ($\op{frec}=62$) y \texttt{new york city}
+  ($\op{frec}=96$) quedan aplastados por la corrección
+  anti-concentrador ($0{,}014$ y $0{,}009$). Se retienen las $5$
+  mejores.
+\item \textbf{Presa densa (fuente~b).} $\langle v_0,e(c)\rangle$ para los
+  $6\,119$ pasajes (mínimo $-0{,}118$; máximo $0{,}445$, en
+  \emph{Christopher Newton}), normalizado al rango $[0,1]$ y escalado
+  por $0{,}05$: \emph{Frances M. Vega} $0{,}443\to0{,}996\to0{,}050$;
+  \emph{Christopher Newton (criminal)} $0{,}428\to0{,}970\to0{,}049$;
+  \emph{David Newton (artist)} $0{,}372\to0{,}871\to0{,}044$. Como la
+  media normalizada es $0{,}45$, la fuente suma $138{,}1$ unidades
+  repartidas por todo el corpus.
+\item \textbf{Anclas débiles (fuente~c).} Para cada $v_j$, las dos fichas
+  canónicas más afines reciben $+0{,}05$: $v_0\to$
+  \texttt{christopher newton} ($0{,}492$), \texttt{frances m. vega}
+  ($0{,}490$); $v_1\to$ \texttt{christopher newton} ($0{,}678$),
+  \texttt{david newton} ($0{,}580$); $v_2\to$ \texttt{frances m. vega}
+  ($0{,}729$), \texttt{iraq war} ($0{,}544$); $v_3\to$ \texttt{frances
+  m. vega} ($0{,}525$), \texttt{christopher newton} ($0{,}410$). Newton
+  y Vega acumulan $+0{,}150$ cada uno.
+\item \textbf{Enlazador y pasaje propio (fuente~d).} Las dos entidades de
+  $L(q)$ ya superan $0{,}5$, así que el máximo no actúa. Después, toda
+  entidad sembrada con pasaje propio deposita
+  $0{,}5\cdot\mathbf{v}(\varepsilon)$ en él: \emph{Frances M. Vega}
+  recibe $0{,}5\times1{,}104=0{,}552$; \emph{David Newton (artist)},
+  $0{,}5\times0{,}931=0{,}465$; \emph{Christopher Newton} ---el pasaje
+  propio de la entrada fundida, es decir, la biografía del director
+  teatral---, $0{,}5\times0{,}601=0{,}301$. Los lugares no tienen pasaje
+  propio, y \emph{Christopher Newton (criminal)} no es pasaje propio de
+  ninguna entrada: se queda con su presa densa.
+\item \textbf{Normalización.}
+  $\norm{\mathbf{v}}_1=2{,}71+138{,}06+0{,}40+1{,}32=142{,}49$ y
+  $\mathbf{v}\leftarrow\mathbf{v}/142{,}49$. El resultado es la
+  tabla~\ref{tab:siembra-ejemplo}.
+\end{enumerate}
+
+\begin{table}[t]
+\centering\scriptsize\setlength{\tabcolsep}{3pt}
+\caption{Paso 1 de la siembra en la pregunta de comparación: los $15$
+hechos de mayor $\sigma$, con su afinidad normalizada $n_a$, el vector
+de consulta que dio el máximo y sus entidades canónicas (entre
+paréntesis, la frecuencia documental que divide su aportación). Los seis
+hechos de \texttt{christopher newton} mezclan al actor canadiense y al
+asesino: la entrada está fundida.}
+\label{tab:siembra-pasos}
+\begin{tabular}{rcccp{0.40\textwidth}p{0.24\textwidth}}
+\toprule
+& $\sigma_a$ & $n_a$ & $v_j$ & hecho $\tau_a$ & entidades (frec.)\\
+\midrule
+1 & $0{,}730$ & $1{,}000$ & $v_2$ & Frances Marie Vega was born on September 2, 1983 & frances m. vega (1)\\
+2 & $0{,}723$ & $0{,}991$ & $v_2$ & Frances Marie Vega was of Puerto Rican descent & frances m. vega (1)\\
+3 & $0{,}692$ & $0{,}953$ & $v_1$ & Christopher J. Newton was born on November 13, 1969 & christopher newton (2)\\
+4 & $0{,}667$ & $0{,}922$ & $v_1$ & Christopher J. Newton was an American murderer & christopher newton (2)\\
+5 & $0{,}664$ & $0{,}919$ & $v_2$ & Frances Marie Vega was a United States Army soldier & frances m. vega (1); united states army (9)\\
+6 & $0{,}656$ & $0{,}908$ & $v_1$ & Christopher Newton is Canadian & christopher newton (2)\\
+7 & $0{,}655$ & $0{,}907$ & $v_2$ & Frances Marie Vega died on November 2, 2003 & frances m. vega (1)\\
+8 & $0{,}649$ & $0{,}899$ & $v_1$ & David Christopher Newton was an American sculptor, painter, \dots & david newton (1)\\
+9 & $0{,}645$ & $0{,}895$ & $v_1$ & Christopher Newton is an actor & christopher newton (2)\\
+10 & $0{,}641$ & $0{,}890$ & $v_1$ & David Christopher Newton lived and worked in North Carolina & david newton (1); north carolina (7)\\
+11 & $0{,}634$ & $0{,}881$ & $v_1$ & David Christopher Newton was born in December 1953 in Oakland, California & david newton (1); california (62); oakland (3)\\
+12 & $0{,}625$ & $0{,}870$ & $v_1$ & Christopher J. Newton died on May 24, 2007 & christopher newton (2)\\
+13 & $0{,}623$ & $0{,}868$ & $v_1$ & David Christopher Newton lived and worked in Massachusetts & david newton (1); massachusetts (8)\\
+14 & $0{,}622$ & $0{,}865$ & $v_1$ & David Christopher Newton lived and worked in New York & david newton (1); new york city (96)\\
+15 & $0{,}621$ & $0{,}865$ & $v_1$ & Christopher J. Newton was a murderer & christopher newton (2)\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Un vector de siembra, desglosado.}
+La tabla~\ref{tab:siembra-ejemplo} muestra $\mathbf{v}$ nodo a nodo y
+fuente a fuente para la pregunta de comparación de la
+sección~\ref{sec:afinidad}, instrumentada exactamente como se evaluó (el
+desglose reproduce la salida del sistema con diferencia $<10^{-15}$), y
+debajo el desglose agregado del ejemplo conductor. Cuatro lecturas.
+(i)~\emph{La masa total la lleva la presa densa}: de las $142{,}5$
+unidades sin normalizar, $138{,}1$ ($97\%$) son la fuente~(b),
+repartidas entre $6\,118$ pasajes ($0{,}023$ de media, es decir
+$1{,}6\cdot10^{-4}$ tras normalizar); en el ejemplo conductor, el $94\%$.
+Las fuentes estructurales (a), (c) y (d) suman el $3$--$6\%$ restante,
+pero concentrado en una decena de nodos: cada entidad sembrada por hechos
+recibe entre $25$ y $50$ veces la masa de un pasaje medio, y cada pasaje
+propio, unas $25$--$30$. La presa densa es, en suma, un \emph{suelo}
+uniforme que garantiza que ningún pasaje tenga masa cero y que el sistema
+no rinda por debajo del recuperador denso, no una señal que compita con
+las semillas.
+(ii)~\emph{La compuerta blanda no discrimina}: sin filtro, el hecho
+\guillemotleft{}David Christopher Newton was an American sculptor\guillemotright{}
+($\sigma=0{,}649$ con $v_1$) siembra a un tercer homónimo,
+\texttt{can:david newton}, con $0{,}881$ ---más que al propio Christopher
+Newton, $0{,}451$, penalizado por su frecuencia documental $2$--- y su
+biografía acaba segunda en el paseo. Es el precio de la variante de
+descomposición y un argumento para llevar también a ella el filtro
+(sección~\ref{sec:falla-aun}).
+(iii)~\emph{El pasaje propio hereda los errores del diccionario}: la
+entrada \texttt{can:christopher newton} funde al director teatral
+canadiense (n.~1936, artículo \emph{Christopher Newton}) con el asesino
+Christopher J. Newton (n.~1969, artículo \emph{Christopher Newton
+(criminal)}), y su pasaje propio es la biografía equivocada; por eso el
+pasaje oro del criminal recibe únicamente su presa densa ($0{,}049$)
+(sección~\ref{sec:diccionario}, limitación~1).
+(iv)~\emph{Qué decide el orden}: la cadena completa se cumple
+($\mathrm{FC@}5=1$: \emph{Frances M. Vega} primera, \emph{Christopher
+Newton (criminal)} cuarta), pero el pasaje del criminal llega por el
+canal de menciones de la entidad fundida y por su presa densa, no por la
+siembra estructural; en el ejemplo conductor, en cambio, los cuatro
+pasajes oro reciben masa directa de la fuente~(d) ($0{,}50$--$0{,}53$
+cada uno; $0{,}0043$--$0{,}0045$ normalizados) y salen en los puestos
+1--4.
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{El vector de siembra $\mathbf{v}$ de la pregunta \guillemotleft{}Are
+Christopher Newton (Criminal) and Frances M. Vega of the same
+nationality?\guillemotright{} (estrategia de descomposición, sin filtro), nodo a nodo
+y fuente a fuente: (a)~hechos (compuerta blanda), (b)~presa densa,
+(c)~anclas débiles, (d)~ancla del enlazador y pasaje propio. Debajo, el
+desglose agregado del ejemplo conductor (estrategia de filtro). Valores
+sin normalizar salvo la última columna.}
+\label{tab:siembra-ejemplo}
+\begin{tabular}{lrrrrrr}
+\toprule
+nodo & (a) & (b) & (c) & (d) & total & $\mathbf{v}$ norm.\\
+\midrule
+\texttt{can:frances m. vega} & $0{,}954$ & & $0{,}150$ & & $1{,}104$ & $0{,}0077$\\
+\texttt{can:david newton} (homónimo) & $0{,}881$ & & $0{,}050$ & & $0{,}931$ & $0{,}0065$\\
+pasaje \emph{Frances M. Vega} (oro) & & $0{,}050$ & & $0{,}552$ & $0{,}602$ & $0{,}0042$\\
+\texttt{can:christopher newton} (fundida) & $0{,}451$ & & $0{,}150$ & & $0{,}601$ & $0{,}0042$\\
+pasaje \emph{David Newton (artist)} & & $0{,}044$ & & $0{,}465$ & $0{,}509$ & $0{,}0036$\\
+pasaje \emph{Christopher Newton} (director teatral) & & $0{,}050$ & & $0{,}301$ & $0{,}351$ & $0{,}0025$\\
+\texttt{can:oakland} & $0{,}294$ & & & & $0{,}294$ & $0{,}0021$\\
+\texttt{can:north carolina} & $0{,}127$ & & & & $0{,}127$ & $0{,}0009$\\
+\texttt{can:iraq war} & & & $0{,}050$ & & $0{,}050$ & $0{,}0004$\\
+pasaje \emph{Christopher Newton (criminal)} (oro) & & $0{,}049$ & & & $0{,}049$ & $0{,}0003$\\
+otros $6\,114$ pasajes (solo presa densa) & & $137{,}9$ & & & $137{,}9$ & $0{,}968$\\
+\midrule
+suma por fuente & $2{,}71$ & $138{,}06$ & $0{,}40$ & $1{,}32$ & $142{,}49$ & $1$\\
+\midrule
+\multicolumn{7}{l}{\emph{ejemplo conductor} (filtro): $5$ entidades a peso $1$ (dos con ancla débil, $1{,}05$); $4$ pasajes propios a $0{,}50$--$0{,}53$}\\
+suma por fuente & $5{,}00$ & $119{,}82$ & $0{,}10$ & $2{,}05$ & $126{,}97$ & $1$\\
+\bottomrule
+\end{tabular}
+\end{table}
 
 \subsubsection{Paseo aleatorio con reinicio y transiciones moduladas}
 \label{sec:ppr}
@@ -1364,18 +2693,29 @@ respuesta: Gisela Elsner.
   y seguido de hechos de otras películas: la semejanza superficial no
   distingue utilidad.
 \item \textbf{Candidatos y filtro} (ec.~\ref{eq:candidatos},
-  \S\ref{sec:filtro}): $\mathcal{K}(q)$ = Top-40 por coseno $\cup$ las 15
-  aserciones de \texttt{can:atomised} (su frontera). El filtro selecciona
+  \S\ref{sec:filtro}): $\mathcal{K}(q)$ = Top-40 por coseno $\cup$ los $15$ hechos de mayor
+  $\sigma$ de los $16$ incidentes en \texttt{can:atomised} (su frontera),
+  de los que $8$ no estaban en el Top-40 (rangos por coseno $65$ a
+  $12\,045$): $48$ candidatos. El hecho puente ocupa el rango $1$ por
+  coseno, así que aquí la frontera no decide. El filtro selecciona
   exactamente un hecho, $S(q) = \{a_1\}$ con
   $\tau_{a_1} = $ \guillemotleft{}Atomised was directed by Oskar Roehler\guillemotright{}:
   conserva el salto intermedio y descarta los directores de otras películas.
 \item \textbf{Siembra} (\S\ref{sec:siembra}): la compuerta dura asigna
   $\mathbf{v}=1$ a \texttt{can:atomised} y \texttt{can:oskar roehler}
   (entidades del hecho aprobado); el ancla del enlazador y el ancla débil
-  elevan \texttt{can:atomised} a $1{,}05$. El término de pasaje propio
+  elevan \texttt{can:atomised} a $1{,}05$ (el máximo con $0{,}5$ no
+  actúa; el ancla débil aporta $+0{,}05$, y otro $+0{,}05$ va a un
+  distractor, \texttt{can:annabelle}); la presa densa reparte $112{,}6$
+  unidades entre los $6\,119$ pasajes ($0{,}050$ a \emph{Atomised (film)},
+  $0{,}030$ a \emph{Oskar Roehler}). El término de pasaje propio
   (ec.~\ref{eq:pasaje-propio}) inyecta masa directa en
-  \emph{Atomised (film)} ($0{,}575$, sumada la presa densa) y en
-  \emph{Oskar Roehler} ($0{,}530$). Obsérvese el punto crítico: la
+  \emph{Atomised (film)} ($0{,}5\times1{,}05=0{,}525$; $0{,}575$ sumada
+  la presa densa) y en \emph{Oskar Roehler} ($0{,}500$; $0{,}530$).
+  Normalizado por $\norm{\mathbf{v}}_1=115{,}8$: $0{,}0091$, $0{,}0086$,
+  $0{,}0050$ y $0{,}0046$ respectivamente. La figura~\ref{fig:traza}
+  recoge la trazabilidad completa, etapa a etapa, y la
+  figura~\ref{fig:traza-subgrafo} el subgrafo efectivo. Obsérvese el punto crítico: la
   biografía del director tiene similitud densa mediocre con la pregunta
   (la pregunta habla de una madre y de una película; la palabra \guillemotleft{}Roehler\guillemotright{} no
   aparece) --- es la cadena
@@ -1389,6 +2729,76 @@ respuesta: Gisela Elsner.
   primer no-oro). Cadena completa en los dos primeros puestos
   ($\mathrm{FC@}2 = 1$).
 \end{enumerate}
+
+\begin{figure}[p]
+\centering
+\begin{tikzpicture}[
+  font=\scriptsize,
+  etapa/.style={draw, rounded corners=2pt, fill=gray!8, align=center, inner sep=3pt, text width=22mm, minimum height=9mm},
+  prod/.style={draw, dashed, rounded corners=2pt, align=left, inner sep=3pt},
+  fl/.style={-{Stealth[length=2mm]}, semithick},
+  gr/.style={-{Stealth[length=2mm]}, semithick, gray}]
+  % ---- pregunta
+  \node[prod, text width=146mm, align=center] (q) at (0,0)
+    {\textbf{Pregunta} \guillemotleft{}Who is the mother of the director of film Atomised (Film)?\guillemotright{} \quad oro: \emph{Atomised (film)}, \emph{Oskar Roehler}};
+  % ---- enrutador
+  \node[etapa] (router) at (-6.2,-1.5) {Enrutador léxico\\ \S\ref{sec:router}};
+  \node[prod, text width=108mm, anchor=west] (p0) at (-4.5,-1.5)
+    {sin marcas de comparación ni de parentesco de 2.\textsuperscript{o} grado $\Rightarrow$ \textbf{composicional} $\Rightarrow$ estrategia de filtro ($J=0$: un solo vector de consulta). El texto de la pregunta sigue intacto.};
+  % ---- dos ramas independientes
+  \node[etapa] (linker) at (-6.2,-4.3) {Enlazador\\ (rama simbólica)\\ \S\ref{sec:linker}};
+  \node[prod, text width=39mm, anchor=west] (p1) at (-4.5,-4.3)
+    {tramo por mayúsculas: \guillemotleft{}Atomised\guillemotright{} (\guillemotleft{}(Film)\guillemotright{} cae con el vocabulario excluido)\\
+     plegado \guillemotleft{}atomised\guillemotright{} $\to$ alias exacto (escalón 1; sin respaldo vectorial)\\
+     $L(q)=\{\texttt{can:atomised}\}$};
+  \node[etapa] (afin) at (1.45,-4.3) {Afinidad\\ (rama semántica)\\ \S\ref{sec:afinidad}};
+  \node[prod, text width=42mm, anchor=west] (p2) at (2.95,-4.3)
+    {$v_0=e(q)$; $\sigma_a=\langle v_0,e(\tau_a)\rangle$ en $47\,999$ hechos (mín $-0{,}100$, máx $0{,}503$)\\
+     1.\textsuperscript{o} \guillemotleft{}Atomised was directed by Oskar Roehler\guillemotright{} $0{,}503$\\
+     2.\textsuperscript{o} \guillemotleft{}Allison Anders is an independent film director\guillemotright{} $0{,}503$\\
+     3.\textsuperscript{o} \guillemotleft{}Allison Anders is an American independent film director\guillemotright{} $0{,}486$};
+  % ---- filtro
+  \node[etapa] (filtro) at (-6.2,-7.6) {Filtro selector\\ (LLM) \S\ref{sec:filtro}};
+  \node[prod, text width=108mm, anchor=west] (p3) at (-4.5,-7.6)
+    {$\mathcal{K}(q)$ = Top-40 por $\sigma$ $\cup$ frontera de \texttt{can:atomised}: $16$ hechos incidentes $\to$ $15$ de mayor $\sigma$, de los que $8$ no estaban en el Top-40 (rangos $65$--$12\,045$) $\Rightarrow$ $48$ candidatos numerados\\
+     juez (\texttt{gpt-4o-mini}, una llamada, $\le 4$ hechos): $S(q)=\{a_1\}$ = \guillemotleft{}Atomised was directed by Oskar Roehler\guillemotright{}; descarta a Allison Anders y a los demás directores\\
+     $\tilde\sigma_{a_1}=1$; para el resto, $\tilde\sigma=\sigma$};
+  % ---- siembra
+  \node[etapa] (siembra) at (-6.2,-11.0) {Siembra $\mathbf{v}$\\ \S\ref{sec:siembra}};
+  \node[prod, text width=108mm, anchor=west] (p4) at (-4.5,-11.0)
+    {(a) compuerta dura sobre $S(q)$: \texttt{can:atomised} $1$, \texttt{can:oskar roehler} $1$ (el director entra aquí por primera vez)\\
+     (b) presa densa: $6\,119$ pasajes $\times\,0{,}05\times$ coseno normalizado con $v_0$ (\emph{Atomised (film)} $0{,}050$; \emph{Oskar Roehler} $0{,}030$); suma $112{,}6$\\
+     (c) anclas débiles: $+0{,}05$ a \texttt{can:atomised} y a \texttt{can:annabelle} (distractor)\\
+     (d) $L(q)$: $\max(\cdot,0{,}5)$ no actúa; pasaje propio: \emph{Atomised (film)} $\mathrel{+}=0{,}5\times1{,}05$ $\to 0{,}575$; \emph{Oskar Roehler} $\mathrel{+}=0{,}5\times1{,}00$ $\to 0{,}530$\\
+     $\norm{\mathbf{v}}_1=115{,}8$ $\Rightarrow$ \texttt{can:atomised} $0{,}0091$, \texttt{can:oskar roehler} $0{,}0086$, \emph{Atomised (film)} $0{,}0050$, \emph{Oskar Roehler} $0{,}0046$};
+  % ---- paseo
+  \node[etapa] (ppr) at (-6.2,-14.2) {PPR modulado\\ \S\ref{sec:ppr}};
+  \node[prod, text width=108mm, anchor=west] (p5) at (-4.5,-14.2)
+    {$\mu_{a_1}=1$ (peaje abierto); los hechos no aprobados quedan en $\mu=0{,}25+0{,}75\,\sigma$; $\lambda=0{,}5$, convergencia en $\sim 30$ iteraciones\\
+     $\mathbf{p}^{*}$: \emph{Atomised (film)} $0{,}0084$ (1.\textsuperscript{o}, oro); \emph{Oskar Roehler} $0{,}0063$ (2.\textsuperscript{o}, oro); \emph{Allison Anders} $0{,}0004$ (3.\textsuperscript{o}) $\Rightarrow$ $\mathrm{FC@}2=1$};
+  % ---- flechas de dependencia (columna de etapas)
+  \draw[fl] (q.south -| router.north) -- (router.north);
+  \draw[fl] (router.south) -- (linker.north);
+  \draw[fl] (router.south) to[out=-90,in=90] (afin.north);
+  \draw[fl] (linker.south) -- (filtro.north);
+  \draw[fl] (afin.south) to[out=-90,in=90] (filtro.north);
+  \draw[fl] (filtro.south) -- (siembra.north);
+  \draw[fl] (siembra.south) -- (ppr.north);
+  % ---- productos que llegan directamente a la siembra (por los margenes)
+  \draw[gr] (linker.west) -- ++(-0.4,0) |- (siembra.west);
+  \node[font=\tiny, gray, anchor=west] at (-7.75,-9.4) {$L(q)$};
+  \draw[gr] (p2.east) -- ++(0.3,0) |- (p4.east);
+  \node[font=\tiny, gray, anchor=east] at (7.85,-9.4) {$v_0$, $\sigma$};
+\end{tikzpicture}
+\caption{Trazabilidad completa de la pregunta de la sección~\ref{sec:traza},
+etapa a etapa y con los valores observados. La estructura de dependencias
+es la de la tabla~\ref{tab:dependencias}: enlazador y afinidad leen solo la
+pregunta y son independientes; el filtro es la primera etapa que necesita
+las dos (Top-40 por $\sigma$ y frontera de $L(q)$); la siembra recibe los
+tres productos (las flechas grises por los márgenes llevan $L(q)$ y
+$v_0,\sigma$ directamente a ella), y el paseo, la siembra y $\tilde\sigma$.}
+\label{fig:traza}
+\end{figure}
 
 \begin{figure}[t]
 \centering
@@ -1423,7 +2833,7 @@ paseo agrega los canales y confirma el orden. El segundo salto de la
 pregunta (la madre) lo responde el lector sobre el pasaje
 \emph{Oskar Roehler}, que contiene
 \guillemotleft{}Oskar Roehler is the son of Gisela Elsner\guillemotright{}.}
-\label{fig:traza}
+\label{fig:traza-subgrafo}
 \end{figure}
 
 % =========================================================================
@@ -1916,8 +3326,9 @@ en indexación: fusión canónica por diccionario con adjudicación LLM
 (\S\ref{sec:diccionario}); cero aristas de sinonimia\\
 \addlinespace
 anclaje de la consulta &
-reconocimiento de entidades (NER) sobre la pregunta + puntuación
-consulta--triplete &
+sin reconocimiento de entidades en consulta: siembran el sujeto y el
+objeto de los tripletes aprobados, peso $s_q/|P_\varepsilon|$
+(ec.~\ref{eq:siembra-hippo}); respaldo denso si el filtro no aprueba nada &
 enlazador contra el diccionario (alias exacto + respaldo vectorial),
 anclas fuertes y masa directa en el pasaje propio
 (ec.~\ref{eq:pasaje-propio})\\
@@ -1929,7 +3340,8 @@ selector con demostraciones sobre Top-40 por coseno $\cup$ frontera de las
 entidades enlazadas (ec.~\ref{eq:candidatos}); compuerta dura en la siembra\\
 \addlinespace
 paseo (PPR) &
-$\lambda=0{,}5$, peso denso $0{,}05$, todos los pasajes sembrados &
+$\lambda=0{,}5$, peso denso $0{,}05$, todos los pasajes sembrados; matriz
+de transición fija en indexación &
 idéntico (adoptado por paridad) $+$ modulación por consulta de las
 transiciones por hecho (ec.~\ref{eq:modulacion})\\
 \addlinespace
@@ -1958,6 +3370,21 @@ que los mecanismos de consulta sean estructurales en lugar de estadísticos:
 el enlazador ancla la pregunta a nodos exactos, la frontera lleva al filtro
 los hechos de esos nodos aunque el coseno no los vea, y el pasaje propio
 convierte cada entidad puente descubierta en un pasaje sembrado.
+
+En términos de las dos palancas de la sección~\ref{sec:palancas}, la
+diferencia es igualmente nítida. \hippo{} inyecta la pregunta solo en la
+fuente $\mathbf{v}$ ---con la entidad puente a peso atenuado,
+$s_q/|P_\varepsilon|$--- sobre un coeficiente $P$ fijo; CatRAG añade un
+coeficiente reponderado a una arista de cinco semillas. \sys{} actúa
+sobre ambas palancas, pero reparte los papeles al revés que CatRAG: el
+\emph{segundo salto} es asunto de la fuente ---la compuerta dura siembra a
+la entidad puente a peso $1$ y la ecuación~\ref{eq:pasaje-propio} a su
+biografía--- y el coeficiente se modula globalmente, sin juez por arista y
+sin límite de alcance. La forma cerrada de la
+ecuación~\eqref{eq:tres-canales} muestra por qué ese reparto es el
+adecuado en el grafo reificado: $\mathbf{v}$ multiplica y
+$\mu_a/Z_\varepsilon$ solo pondera, de modo que ningún coeficiente rescata
+a un pasaje cuyo puente no fue sembrado.
 
 \subsubsection{Resultados de la comparación}
 
@@ -2173,8 +3600,16 @@ a Edith Carlmar, y sus puestos 4--10 son \emph{otras películas de Edith
 Carlmar} (\emph{Altid ballade}, \emph{Bedre enn sitt rykte}) y directores
 ajenos: el paseo entró en la rama de Carlmar, cuyo nodo-frase concentra
 aristas, y la masa nunca alcanzó a Michael Curtiz (ausente del top-10).
-Es la deriva hacia concentradores que el propio artículo de CatRAG
-diagnostica, agravada porque las dos ramas compiten por la misma masa.
+La causa es cuantificable en su matriz de transición, fijada en
+indexación (sección~\ref{sec:palancas}): de \emph{Aldri annet enn bråk} a
+Edith Carlmar el paseo cruza con probabilidad $0{,}316$ (tres tripletes
+entre ambas), de \emph{God's Gift to Women} a Michael Curtiz con
+$0{,}105$ (un triplete, la misma probabilidad que hacia
+\guillemotleft{}musicals\guillemotright{}), y desde Carlmar cada una de sus otras películas
+recibe $0{,}037$, más de lo que la biografía de Curtiz recibe de su propio
+nodo ($1/103$). Es la deriva hacia concentradores que el propio artículo
+de CatRAG diagnostica, agravada porque las dos ramas compiten por la
+misma masa.
 \sys{} devuelve los cuatro pasajes oro en los puestos 1--4: el filtro
 aprueba \emph{los dos} hechos de dirección (la consigna obliga a conservar
 todos los candidatos de un papel), la compuerta dura siembra a los dos
@@ -2189,11 +3624,18 @@ $5$).
 CatRAG comparte nuestro diagnóstico (grafo estático, concentradores,
 cadena rota) y ataca el \emph{recorrido}: anclas, aristas reponderadas por
 consulta, refuerzo de pasajes. Su ganancia es real pero acotada
-($\mathrm{FC@}5$ $66{,}1 \to 67{,}6$; su ablación atribuye $1$--$2$ puntos
-a cada mecanismo), porque opera sobre la representación heredada: tripletes
-planos y entidades fragmentadas. Cuando la mención del puente y su
-biografía son nodos distintos sin arista fiable, ningún recorrido, por
-adaptado que esté, puede cruzar. Nuestros resultados sugieren que la
+($\mathrm{FC@}5$ $66{,}1 \to 67{,}6$; su ablación atribuye $0{,}9$ y
+$1{,}4$ puntos de exhaustividad a las anclas y a la reponderación, y el
+refuerzo de pasajes resta $1{,}4$ en 2Wiki), por dos razones que la
+sección~\ref{sec:palancas} desarrolla. La primera es de alcance: la
+reponderación llega a una arista de las semillas; en la pregunta anterior
+podría amplificar película$\to$Curtiz, pero la fila de Curtiz seguiría
+siendo la estática y su biografía quedaría a una arista de la cadena,
+sin refuerzo de pasaje, porque ningún triplete aprobado la respalda. La
+segunda es de representación: opera sobre tripletes planos y entidades
+fragmentadas, y cuando la mención del puente y su biografía son nodos
+distintos sin arista fiable, ningún recorrido, por adaptado que esté,
+puede cruzar. Nuestros resultados sugieren que la
 palanca grande estaba en la representación: con el grafo reificado sobre
 entidades canónicas, los mismos mecanismos de recorrido (que heredamos de
 esa línea) rinden $90{,}6$ de cadena completa donde el recorrido solo
@@ -2241,11 +3683,616 @@ aunque figuraba en la lista; con una consigna de dos fases
 modelo seleccionó ambos puentes. El tope de 4 hechos es además
 estructuralmente insuficiente en comparación-puente, que necesita al menos
 4 (dos direcciones y dos fechas). Las líneas de mejora priorizadas
----filtro planifica-y-selecciona, selección final de \emph{conjunto} sobre
+---filtro planifica-y-selecciona, extendido a la estrategia de comparación
+(donde la compuerta blanda siembra homónimos, sección~\ref{sec:siembra}),
+selección final de \emph{conjunto} sobre
 el top-10 (30 oros del banco quedan en puestos 6--10), segundo salto
 dirigido cuando el plan nombra un hueco, y enlazador por NER-LLM (la regla
 de mayúsculas produjo el tramo roto \guillemotleft{}Magician (1958\guillemotright{} en un fallo)---
-atacan exactamente este perfil y se validarán primero en el sondeo.
+atacan exactamente este perfil; el Plan A, que implementa las tres
+primeras, se describe y mide en la sección~\ref{sec:evoluciones}. Las
+evoluciones de la memoria canónica se recogen, ordenadas, en la
+sección~\ref{sec:memoria}, y todas juntas, con la adaptación clínica y la
+generalización, en la sección~\ref{sec:futuro}.
+
+% =========================================================================
+\section{Evoluciones, adaptación al asistente GeSIDA y generalización}
+\label{sec:futuro}
+
+Los apartados anteriores dejan planteadas evoluciones dispersas por
+componente (memoria canónica, E1--E9; enlazador, L1--L4; candidatos,
+siembra, paseo). Esta sección las reúne en un solo lugar y las separa
+con claridad de lo que ya está ejecutado y medido; después traduce los
+mecanismos validados en 2Wiki a un plan de adaptación concreto para el
+asistente clínico; y cierra con el protocolo de generalización a otros
+conjuntos de datos, con las referencias publicadas contra las que
+comparar. El criterio es el mismo en las tres partes: cada evolución
+lleva la evidencia que la motiva, el efecto esperado, el coste y cómo se
+mide, y nada se ajusta sobre el banco de pruebas.
+
+\subsection{Evoluciones del sistema}
+\label{sec:evoluciones}
+
+\paragraph{Qué está ejecutado y qué no.}
+El sistema descrito en las secciones~\ref{sec:metodos}--\ref{sec:resultados}
+es la versión v3 ---memoria canónica, enlazador, frontera, filtro con
+compuerta dura, pasaje propio---, medida en paridad estricta con \hippo{}
+($96{,}0$ / $90{,}6$). Sobre ella se ha implementado y medido una
+evolución más, el \emph{Plan A}, que ataca el cuello de botella
+identificado en la sección~\ref{sec:falla-aun} ---el juicio del filtro---
+sin tocar la representación. El resto de evoluciones de esta sección son
+propuestas con evidencia, no implementadas.
+
+\paragraph{Evolución ejecutada: el Plan A (analista, salto dirigido y conjunto).}
+El Plan A extiende la v3 sin modificarla y sustituye la llamada del
+filtro por tres mecanismos:
+\begin{enumerate}[leftmargin=1.6em, itemsep=2pt]
+\item \textbf{Analista de la pregunta} (una llamada, siempre). Recibe la
+  pregunta y la lista de candidatos $\mathcal{K}(q)$ y devuelve, en JSON
+  estricto: las \emph{menciones} de la pregunta con su forma canónica
+  ---el reconocimiento de entidades que el enlazador por mayúsculas no
+  hace (evolución L1)---; el \emph{plan} de la cadena como lista de
+  huecos (\guillemotleft{}director de $A$ $\to$ $X$\guillemotright{}, \guillemotleft{}fecha de muerte de
+  $X$\guillemotright{}), con la prohibición explícita de rellenar un hueco con
+  conocimiento paramétrico (en la iteración previa el analista inventaba
+  directores); la \emph{selección} de hechos que rellenan huecos, con
+  tope dinámico igual al número de huecos (máximo $8$, frente al tope
+  fijo de $4$ del filtro, insuficiente en cadenas de cuatro); y los
+  \emph{huecos sin cubrir}, redactados como consulta de recuperación.
+  Absorbe en una sola llamada el filtro selector y el enlazador.
+\item \textbf{Salto dirigido} (una llamada, solo si quedan huecos). Cada
+  hueco sin cubrir se incrusta y se buscan sus hechos más afines entre
+  candidatos \emph{estructurales}: las aserciones del pasaje propio de
+  las entidades enlazadas o descubiertas. Un mini-filtro los adjudica y
+  se vuelve a sembrar. Es lo que rescata el puente verbalizado en otro
+  idioma (\emph{Ansiktet} / \emph{The Magician}), inalcanzable para el
+  coseno y para la frontera.
+\item \textbf{Selección final de conjunto} (una llamada; se omite en
+  comparación). Del top-12 del paseo, el modelo elige los $5$ pasajes que
+  \emph{juntos} cubren el plan, conservando siempre el top-2 del paseo
+  como guarda. Responde a los $30$ oros que la v3 dejaba en los puestos
+  6--10.
+\end{enumerate}
+El coste es de $\sim 2{,}2$ llamadas por consulta; con
+\texttt{deepseek-chat} (V3), $\sim 0{,}001$~USD por consulta y $\sim
+1$~USD la medición completa. Todas las llamadas se guardan en caché
+SQLite por (modelo, resumen del mensaje), de modo que las re-mediciones
+son gratuitas.
+
+La tabla~\ref{tab:plan-a} resume la evidencia. En el sondeo (retenido) la
+ganancia es del \emph{diseño} y no del modelo: \texttt{gpt-4o-mini} pasa
+de $92{,}0$ a $96{,}0$ de $\mathrm{FC@}5$, \texttt{gpt-4o} solo añade
+$0{,}5$ más a quince veces el coste, y un modelo abierto de $20\,000$
+millones de parámetros (\texttt{gpt-oss-20b}) empata de hecho con
+DeepSeek; un modelo que no produce planes válidos (\texttt{qwen3.6-27b})
+marca el suelo. Sobre el banco, con \texttt{deepseek-chat}, el Plan A
+alcanza $\mathrm{R@}5$ $98{,}6$ y $\mathrm{FC@}5$ $97{,}1$;\footnote{La
+medición del 25 de agosto dio $98{,}5$ / $96{,}9$; la re-ejecución
+posterior con las mismas consignas dio $98{,}6$ / $97{,}1$. La
+diferencia es de dos preguntas y refleja el no determinismo residual del
+modelo.} pareado frente a \hippo{}, $\Delta\mathrm{FC@}5=+31{,}3$
+$[+28{,}4,\,+34{,}4]$ (gana $322$, pierde $9$) y, frente a la v3,
+$+6{,}5$ $[+4{,}7,\,+8{,}2]$ (gana $74$, pierde $9$), significativo en
+todos los tipos salvo comparación ($+0{,}4$, ya saturada). Las
+ablaciones aditivas en el sondeo atribuyen la ganancia: el analista solo
+aporta $+0{,}5$ ---su valor es producir el plan que consumen los otros
+dos---, el salto dirigido es el mayor contribuyente individual
+($+3{,}0$; doble puente $86 \to 96$) y el conjunto final aporta orden
+temprano ($+1{,}5$ de $\mathrm{FC@}5$ y $+6$ de $\mathrm{FC@}2$), con
+ligera superaditividad ($5{,}0$ frente a $5{,}5$ observado).
+
+El hallazgo conceptual es que el gradiente de dificultad de la
+sección~\ref{sec:saltos} se \emph{invierte}: por estructura de salto, el
+Plan A rinde $99{,}6$ (sin puente), $95{,}0$ (puente simple) y $99{,}1$
+(doble puente). El segmento que era el peor de todos los sistemas
+publicados ($0{,}9$ BM25, $12{,}3$ \hippo{}) es ahora el mejor, y queda
+muy por encima del modelo multiplicativo ($p_B=0{,}975$ predice $90{,}3$
+para cuatro oros): el plan asigna recursos \emph{por cadena} ---huecos
+explícitos, tope dinámico, conjunto final---, de modo que la doble
+cadena no comparte un presupuesto fijo sino que recibe el doble. Es la
+refutación constructiva del colapso estructural de \hippo{}.
+
+Dos reservas mantienen al Plan A fuera de las tablas principales de este
+documento. Primera, paridad: \texttt{deepseek-chat} no es
+\texttt{gpt-4o-mini}; la comparación en igualdad exacta de modelos es la
+del sondeo ($96{,}0$ con \texttt{gpt-4o-mini}) y, en el banco, la v3.
+Segunda, contaminación de diseño: las demostraciones del analista deben
+re-derivarse del conjunto de calibración y medirse una sola vez
+(\guillemotleft{}cifra de archivo\guillemotright{}, sección~\ref{sec:validez}) antes de
+promoverlo a resultado principal.
+
+\begin{table}[p]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{Evidencia del Plan A. Arriba: matriz de modelos del analista en
+el sondeo retenido ($200$ preguntas), con el coste aproximado por
+consulta. Centro: ablaciones aditivas en el sondeo con
+\texttt{deepseek-chat}. Abajo: banco de pruebas ($1\,000$), con la
+comparación pareada (IC del $95\%$ por bootstrap; entre paréntesis,
+preguntas que gana / pierde).}
+\label{tab:plan-a}
+\scriptsize\setlength{\tabcolsep}{3.5pt}
+\begin{tabular}{lcccp{0.36\textwidth}}
+\toprule
+sondeo (200): modelo del analista & $\mathrm{R@}5$ & $\mathrm{FC@}5$ & USD/consulta & \\
+\midrule
+v3 (referencia; \texttt{gpt-4o-mini}) & $97{,}1$ & $92{,}0$ & $0{,}0004$ & \\
+Plan A, \texttt{gpt-4o-mini} & $98{,}5$ & $96{,}0$ & $0{,}0008$ & misma paridad que la v3\\
+Plan A, \texttt{gpt-4o} & $98{,}6$ & $96{,}5$ & $0{,}012$ & $+0{,}5$ a $15\times$ coste\\
+Plan A, \texttt{gpt-oss-20b} (Groq) & $98{,}9$ & $97{,}0$ & $0{,}0005$ & alternativa abierta validada\\
+Plan A, \texttt{deepseek-chat} & $\mathbf{99{,}0}$ & $\mathbf{97{,}5}$ & $0{,}0010$ & adoptado\\
+Plan A, \texttt{qwen3.6-27b} & $85{,}6$ & $67{,}5$ & --- & planes vacíos: suelo\\
+\midrule
+ablaciones (sondeo, \texttt{deepseek-chat}) & $\mathrm{FC@}5$ & $\mathrm{FC@}2$ & doble puente & aporte\\
+\midrule
+v3 & $92{,}0$ & $46{,}0$ & $82{,}0$ & ---\\
+$+$ analista & $92{,}5$ & $55{,}5$ & $86{,}0$ & $+0{,}5$ (habilitador)\\
+$+$ analista $+$ conjunto & $94{,}0$ & $61{,}0$ & $86{,}0$ & $+1{,}5$\\
+$+$ analista $+$ salto & $95{,}5$ & $55{,}0$ & $96{,}0$ & $+3{,}0$\\
+Plan A completo & $\mathbf{97{,}5}$ & $\mathbf{61{,}5}$ & $\mathbf{96{,}0}$ & $+5{,}5$\\
+\midrule
+banco (1\,000) & $\mathrm{R@}2$ & $\mathrm{R@}5$ & $\mathrm{FC@}5$ & $\mathrm{FC@}5$ por tipo (comp./compos./infer./p.-comp.)\\
+\midrule
+\hippo{} & $70{,}7$ & $85{,}9$ & $65{,}8$ & $93{,}4$ / $77{,}2$ / $75{,}9$ / $12{,}3$\\
+v3 (\texttt{gpt-4o-mini}) & $73{,}0$ & $96{,}0$ & $90{,}6$ & $99{,}2$ / $91{,}0$ / $84{,}3$ / $83{,}8$\\
+Plan A (\texttt{deepseek-chat}) & $\mathbf{82{,}2}$ & $\mathbf{98{,}6}$ & $\mathbf{97{,}1}$ & $99{,}6$ / $96{,}1$ / $90{,}7$ / $99{,}1$\\
+Plan A v4 (\texttt{gpt-4o-mini}; \S\ref{sec:v4}) & $80{,}2$ & $98{,}1$ & $96{,}0$ & $99{,}6$ / $95{,}9$ / $84{,}3$ / $97{,}9$\\
+\multicolumn{5}{p{0.93\textwidth}}{pareado Plan A $-$ \hippo{}: $\mathrm{FC@}5$ $+31{,}3$ $[+28{,}4,+34{,}4]$ (gana 322 / pierde 9); $\mathrm{R@}5$ $+12{,}7$; $\mathrm{R@}2$ $+11{,}5$; por tipo: p.-comp.\ $+86{,}8$, compos.\ $+18{,}9$, infer.\ $+14{,}8$, comp.\ $+6{,}1$ (todos significativos)}\\
+\multicolumn{5}{p{0.93\textwidth}}{pareado Plan A $-$ v3: $\mathrm{FC@}5$ $+6{,}5$ $[+4{,}7,+8{,}2]$ (gana 74 / pierde 9); $\mathrm{R@}2$ $+9{,}2$; por tipo: p.-comp.\ $+15{,}3$, compos.\ $+5{,}1$, infer.\ $+6{,}5$ $[0{,}0,+13{,}0]$, comp.\ $+0{,}4$ (n.s.)}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Evoluciones propuestas.}
+La tabla~\ref{tab:evoluciones} reúne las evoluciones no implementadas,
+ordenadas por componente, con la evidencia que las motiva, el efecto
+esperado y cómo se mide, el coste y el estado. Tres criterios las
+gobiernan. Primero, \emph{generalidad}: se descartan los parches
+específicos del banco (reintentar el alias anteponiendo el artículo,
+reglas léxicas por tipo) en favor de mecanismos que no dependen del
+idioma ni de la forma de los títulos. Segundo, \emph{medida antes que
+intuición}: donde una alternativa se pudo medir sin coste (enlazador,
+frontera, presa densa) la cifra figura; donde no, se indica qué medición
+la decidiría. Tercero, \emph{protocolo}: toda evolución se valida en el
+sondeo y se mide una sola vez en el banco, con comparación pareada.
+
+\begin{table}[p]
+\centering\scriptsize\setlength{\tabcolsep}{3pt}
+\caption{Evoluciones del sistema por componente. E$n$ y L$n$ remiten a
+las listas de las secciones~\ref{sec:memoria} y~\ref{sec:linker}. Coste en
+USD aproximados; \guillemotleft{}0\guillemotright{} significa sin llamadas nuevas (caché).}
+\label{tab:evoluciones}
+\begin{tabular}{p{0.09\textwidth}p{0.27\textwidth}p{0.19\textwidth}p{0.19\textwidth}p{0.06\textwidth}p{0.10\textwidth}}
+\toprule
+componente & evolución & evidencia & efecto esperado y medida & coste & estado\\
+\midrule
+extracción & consigna v2: sujeto $=$ forma del título $+$ alias; roles $n$-arios completos; descripciones de ficha redactadas por el modelo & el canal contexto mide pasaje y no entidad; $1\,342$ títulos sintéticos & menos uniones título$\to$sujeto necesarias; auditar con QIDs & $\sim 2{,}5$ & propuesta\\
+\addlinespace
+memoria canónica & E1 auditoría con QIDs; E2 procedencia y estado por alias; E3 decisiones registradas y regeneración determinista; E4 re-adjudicación de las $1\,549$ uniones de título; E5 candidatos por umbral; E6 canal contexto por rol; E7 colisiones; E8 identidad externa; E9 bandeja unificada. Nuevo: la ficha-título hereda las fechas del sujeto, y un nombre base idéntico con desambiguador entre paréntesis va al juez & sobre-fusión medida: parientes, secuelas, homónimos (\texttt{can:christopher newton}) & precisión y exhaustividad de fusión con oro externo; re-medición pareada & $1$--$2$ & E1, E4 ejecutadas; E2, E7 parciales (\S\ref{sec:v4})\\
+\addlinespace
+enlazador & L1 reconocimiento de entidades (absorbido por el analista); L2 escalón 2 de nombre a nombre: Dice $\ge 0{,}80$ $\vee$ coseno de nombre $\ge 0{,}85$, ficha como desempate; L3 BM25 solo como candidatos; L4 colisiones & escalón 2 inactivo ($3$ de $275$); la unión medida da $179$ correctos / $8$ erróneos & $+176$ enlaces correctos netos; $\mathrm{FC@}5$ pareado & $0$ & L1, L2 ejecutadas; L4 parcial; L3 propuesta (\S\ref{sec:v4})\\
+\addlinespace
+candidatos $\mathcal{K}(q)$ & frontera completa para entidades con $\le 30$ hechos; candidatos estructurales del pasaje propio (como en el salto dirigido) & $9\%$ de los hechos oro de primer salto quedan fuera de $\mathcal{K}(q)$ & cobertura de $\mathcal{K}(q)$ sin llamadas; después $\mathrm{FC@}5$ & $0$ & propuesta\\
+\addlinespace
+filtro & analista con plan y tope dinámico (ejecutado); extenderlo a la estrategia de comparación & la compuerta blanda siembra homónimos (David Newton) & orden temprano en comparación ($\mathrm{FC@}2$) & 1 llamada en el $24\%$ & ejecutada (\S\ref{sec:v4})\\
+\addlinespace
+siembra & (i) ablación de la presa densa y de $w_{\text{pas}}$; (ii) normalización por grado del pasaje, $\mathbf{p}^{*}(c)/d(c)^{\beta}$; (iii) agregación conjuntiva de semillas en los tipos con dos entidades nombradas & la presa densa es el $94$--$97\%$ de la masa; sesgo a pasajes con muchos hechos & $\beta\in\{0,\,0{,}25,\,0{,}5,\,1\}$ y conjunción condicionada por tipo, todo con caché & $0$ & propuesta\\
+\addlinespace
+paseo & ablación de la modulación ($\mu\equiv 1$) sobre el banco; perfil de pesos por longitud solo en los grafos con ciclos (clínico) & en la traza la modulación no cambia el orden; su contribución no está aislada & cuantificar $\mu$; en el grafo por capas la profundidad es $2$ & $0$ & propuesta\\
+\addlinespace
+coste (Plan B) & comparación sin LLM ($24\%$ de consultas a coste cero); compuerta de confianza (filtro solo si las entidades enlazadas no tienen su pasaje en el top-5); caché de prefijo de consigna; modelo más barato con regla dura $\mathrm{FC@}5\ge 92$ en sondeo & comparación $99{,}2$ en v3 sin depender del juez & $\sim 0{,}5$ llamadas por consulta a igual calidad & $0$ & propuesta\\
+\addlinespace
+evaluación & QA extremo a extremo (EM/F1 y JSR con lector compartido; referencias: JSR $53{,}0$ \hippo{}, $55{,}0$ CatRAG con Llama-70B); cifra de archivo con demostraciones re-derivadas de calibración; MuSiQue y HotpotQA (\S\ref{sec:generalizacion}) & columna F1 pendiente en la tabla~\ref{tab:sota} & comparabilidad completa con los artículos & $1$ / $1$ / $20$ & propuesta\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Evoluciones ejecutadas el 30 de agosto: curación auditada del
+diccionario, enlazador de nombre a nombre y Plan A generalizado.}
+\label{sec:v4}
+Antes de indexar otro conjunto de datos se ejecutaron, con el protocolo de
+siempre (validación en el sondeo, una sola medición en el banco), las
+evoluciones que la tabla~\ref{tab:evoluciones} señalaba como prerrequisito de
+la generalización: las que corrigen el índice ---porque un índice nuevo
+heredaría sus defectos--- y las que retiran del flujo de consulta las reglas
+específicas de 2Wiki. Todos los artefactos nuevos llevan el sufijo
+\texttt{\_v4}; la versión v3 descrita en las secciones anteriores queda
+intacta.
+
+\emph{Auditoría con oro externo (E1).} La tabla~\ref{tab:auditoria-qid} mide
+el diccionario contra los identificadores Wikidata que el propio conjunto trae
+en cada pregunta. La unidad es el par (forma, QID) de las entidades de la
+cadena ---sujetos de evidencia y títulos oro---; los objetos-literal
+(gentilicios, lugares) quedan fuera porque su QID en el oro es inconsistente
+(\guillemotleft{}American\guillemotright{} aparece bajo cuatro QIDs), y una misma forma bajo dos
+QIDs (\guillemotleft{}Michael Curtiz\guillemotright{} bajo Q1559143 y Q51491) se excluye como ruido
+del oro. La atribución usa la \emph{procedencia} de cada unión, que la v4
+registra (E2) y que para la v3 se reprodujo en seco con la lógica original
+($26\,932$ de $26\,934$ grupos idénticos). El resultado confirma el
+diagnóstico de la sección~\ref{sec:diccionario}: en la v3, el origen que con
+más frecuencia tiende el puente entre dos QIDs distintos es la unión
+título$\to$sujeto ejecutada cuando el título ya era mención propia ($40$ de
+$74$ entradas sobre-fundidas).
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{Auditoría del diccionario con los QIDs del oro (banco; $2\,487$ pares
+forma--QID de entidades de la cadena, $2\,293$ resueltos a una entrada).
+Sobre-fusión: entradas con dos o más QIDs de formas distintas; infra-fusión:
+QIDs repartidos en dos o más entradas. \guillemotleft{}Origen puente\guillemotright{}: origen de la
+unión menos frecuente en el camino que conecta las fichas de los dos QIDs.}
+\label{tab:auditoria-qid}
+\begin{tabular}{lrrrl}
+\toprule
+diccionario & entradas & sobre-fundidas & infra & origen puente de la sobre-fusión\\
+\midrule
+v3 & $26\,960$ & $74$ de $2\,211$ tocadas ($3{,}3\%$) & $6$ & título$\to$sujeto no sintética $40$; juez $19$; casi idéntico $18$; idéntico $16$\\
+v4 & $27\,966$ & $\mathbf{32}$ de $2\,249$ & $6$ & juez $9$; título$\to$sujeto juzgada $8$; idéntico $8$; casi idéntico $5$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\emph{Curación del diccionario (v4).} Cuatro cambios en la consolidación,
+todos como decisiones registradas y no como parches: (i) la unión
+título$\to$sujeto solo es automática cuando el título es mención
+\emph{sintética} y el sujeto candidato es único; si el título ya es mención
+propia ($1\,549$ casos) o hay empate ($202$), el par va al juez, que rechazó
+$893$ de los $1\,549$ y aceptó $192$ de los $202$; (ii) la ficha-título sin
+fechas hereda las del sujeto único del artículo ($911$ fichas), lo que
+desactiva la fusión automática de homónimos como \texttt{can:christopher
+newton}; (iii) un nombre base idéntico ---o casi idéntico--- con
+desambiguador entre paréntesis distinto va al juez en lugar de fundirse
+(\guillemotleft{}The Girl of the Golden West\guillemotright{} de 1915, 1922, 1923, 1938 y 1942 eran
+una sola entrada); (iv) cada entrada guarda el recuento de uniones por
+origen. Coste: $2\,325$ adjudicaciones nuevas, unos céntimos. La sobre-fusión
+baja de $74$ a $32$ entradas; el residuo son parientes con nombre casi
+igual que el propio juez acepta (\guillemotleft{}Edsel Ford\guillemotright{}/\guillemotleft{}Henry Ford\guillemotright{},
+\guillemotleft{}Otto\guillemotright{}/\guillemotleft{}Karl von Habsburg\guillemotright{}), materia de la señalización
+estructural E4.
+
+\emph{Enlazador de nombre a nombre (L2, con L4 parcial).} El escalón 2 pasa a
+comparar el tramo con los \emph{alias}: manda el coeficiente de Dice de
+trigramas ($\ge 0{,}80$), que mide truncamientos y penaliza la palabra que
+falta (\guillemotleft{}bad education movie\guillemotright{} no es \guillemotleft{}Bad Education\guillemotright{}); el coseno de
+nombre ($\ge 0{,}85$) solo admite candidatos cuando el léxico no admite a
+nadie; entre entradas a menos de $0{,}02$ de la mejor decide la ficha con
+descripción. Dos correcciones acompañan: el escalón exacto prueba primero la
+forma con el desambiguador conservado (\guillemotleft{}X (1922 film)\guillemotright{} ya no colisiona
+con \guillemotleft{}X (1923 film)\guillemotright{}) y las colisiones de alias se resuelven por ficha y
+no por orden de carga; y el posesivo se retira solo al final del tramo
+(\guillemotleft{}Lothair II's mother\guillemotright{}), porque dentro del tramo es parte del nombre
+(\guillemotleft{}God's Gift to Women\guillemotright{}). Sobre $18$ títulos del sondeo truncados como
+fallan en el banco, L2 enlaza $16$ frente a $4$ del escalón vectorial de la
+v3.
+
+\emph{Plan A generalizado.} Cuatro cambios retiran del flujo lo específico de
+2Wiki: la selección final de conjunto se ejecuta en todos los tipos (el
+enrutador léxico queda solo como etiqueta del desglose); el analista devuelve,
+por hueco sin cubrir, la entidad \emph{ancla} a la que se refiere, y los
+candidatos estructurales del salto dirigido salen del pasaje propio de esa
+ancla (antes, de una subcadena del nombre en el texto del hueco); las formas
+canónicas del analista se enlazan con L2; y el salto dirigido admite varias
+rondas: si tras un salto quedan huecos con comodín $[X]$, el analista
+re-planifica con los hechos descubiertos a la vista y se salta de nuevo (a lo
+sumo tres rondas; en cadenas de dos saltos degenera en una). Las
+demostraciones del analista se re-derivaron del conjunto de calibración
+(\guillemotleft{}Convoy Buddies / Tip Toes\guillemotright{}, \guillemotleft{}Zoolander 2\guillemotright{}), lo que retira la
+primera de las dos reservas de la tabla~\ref{tab:plan-a}.
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{Escalera del paquete v4 en el sondeo retenido ($200$ preguntas,
+analista \texttt{gpt-4o-mini} = paridad). \guillemotleft{}dicc v3\guillemotright{}: mismo plan y enlazador
+con el diccionario de la v3. Pareado: diferencia de $\mathrm{FC@}5$ frente al
+Plan A del 25 de agosto con el mismo modelo (IC del $95\%$; gana / pierde).}
+\label{tab:v4-sondeo}
+\begin{tabular}{lcccl}
+\toprule
+configuración & $\mathrm{R@}5$ & $\mathrm{FC@}5$ & $\mathrm{FC@}10$ & pareado\\
+\midrule
+Plan A, 25 de agosto & $98{,}5$ & $96{,}0$ & $96{,}5$ & ---\\
+v4a: diccionario curado (1.ª) $+$ L2 $+$ plan generalizado & $98{,}6$ & $96{,}5$ & $98{,}0$ & $+0{,}5$ $[-2{,}5,+3{,}5]$ (5/4)\\
+\quad v4a con el enlazador de la v3 & $98{,}5$ & $96{,}5$ & $97{,}5$ & L2 neutro en 2Wiki\\
+\quad plan generalizado $+$ L2 con dicc v3 & $99{,}2$ & $98{,}0$ & $98{,}5$ & $+2{,}0$ n.s.\\
+\textbf{v4} (desambiguador en \guillemotleft{}casi idéntico\guillemotright{}; exacto con paréntesis) & $\mathbf{98{,}8}$ & $\mathbf{97{,}0}$ & $98{,}0$ & $+1{,}0$ $[-1{,}5,+4{,}0]$ (5/3)\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\emph{Resultado en el sondeo.} La tabla~\ref{tab:v4-sondeo} muestra que
+generalizar no cuesta nada en 2Wiki: la v4 queda en paridad estadística con
+el Plan A, ligeramente por encima. La ablación con el diccionario de la v3
+($98{,}0$) obliga a una lectura honesta: el diccionario curado \emph{pierde}
+dos preguntas que la v3 acertaba por fusiones erróneas afortunadas. En
+\guillemotleft{}\emph{Where was the director of film Evil Eyes born?}\guillemotright{} el oro es el
+pasaje \guillemotleft{}Mark Atkins (footballer)\guillemotright{}: el conjunto de datos enlazó a un
+futbolista como director, y la v3 lo fundía con el director homónimo; en
+\guillemotleft{}\emph{Who is the husband of Lady Gouyi?}\guillemotright{} la v3 fundía al emperador Wu (el
+marido) con su hijo el emperador Zhao (el oro). La tercera pérdida de la
+primera v4 ---las cinco películas homónimas fundidas--- era un fallo real y
+está corregida. Se adopta la v4: es el principio correcto, es la que
+necesitan los conjuntos sin identificadores externos, y las dos preguntas
+que cede se documentan como ruido del oro.
+
+\emph{Generalización del banco de pruebas.} El harness admite ya varios
+conjuntos con un esquema común (\texttt{\_id}, tipo, pasajes oro) y un
+prefijo por conjunto en splits y artefactos; MuSiQue se normaliza desde sus
+\texttt{paragraphs} y el número de saltos de su descomposición. Para HotpotQA
+se generó el sondeo de $200$ ($100$ de puente, $100$ de comparación, nivel
+\emph{hard}, desde el conjunto de entrenamiento; mini-corpus de $1\,990$
+pasajes), con BM25 como suelo: banco $\mathrm{R@}5$ $72{,}8$ / $\mathrm{FC@}5$
+$49{,}5$ (puente $45{,}4$, comparación $67{,}2$); sondeo $77{,}2$ /
+$58{,}5$. Sobre ese sondeo, el Plan A v4 con la configuración congelada y
+\texttt{gpt-4o-mini} ---cero ajuste al conjunto--- obtiene $\mathrm{R@}5$
+$98{,}8$ / $\mathrm{FC@}5$ $97{,}5$ (puente $95{,}0$, comparación $100$), lo
+que sostiene H1 en el sondeo; el banco, con corpus cinco veces mayor, es la
+prueba que cuenta. Las ablaciones en ese mismo sondeo reparten la
+contribución como en 2Wiki: el salto dirigido aporta $+2{,}0$ de
+$\mathrm{FC@}5$ $[+0{,}5,+4{,}0]$ (puente $91{,}0 \to 95{,}0$) y la selección
+de conjunto $+4{,}0$ de $\mathrm{R@}2$ $[+1{,}5,+6{,}8]$ ---orden temprano--- y
+$+2$ puntos de $\mathrm{FC@}5$ en comparación, lo que justifica ejecutarla en
+todos los tipos. 
+
+\emph{Cifra de archivo en paridad estricta.} La medición única del banco de
+2Wiki con la configuración v4 congelada y \texttt{gpt-4o-mini} ---el mismo
+modelo que la v3, que \hippo{} reproducido y que CatRAG publicado--- da
+$\mathrm{R@}2$ $80{,}2$, $\mathrm{R@}5$ $98{,}1$, $\mathrm{FC@}5$ $96{,}0$ y
+$\mathrm{FC@}10$ $96{,}7$ (por tipo, $\mathrm{FC@}5$: comparación $99{,}6$,
+composicional $95{,}9$, inferencia $84{,}3$, comparación-puente $97{,}9$; fila
+añadida a la tabla~\ref{tab:plan-a}). Pareada, supera a la v3 en $+5{,}4$ de
+$\mathrm{FC@}5$ $[+3{,}7,+7{,}1]$ (gana $67$, pierde $13$; comparación-puente
+$+14{,}0$, composicional $+4{,}8$, ambas significativas) y a \hippo{} en
+$+30{,}2$ $[+27{,}2,+33{,}2]$ (gana $317$, pierde $15$); frente a CatRAG
+publicado con los mismos modelos ($87{,}0$ / $67{,}6$), $+11{,}1$ de
+$\mathrm{R@}5$ y $+28{,}4$ de cadena completa. Esta fila retira la reserva de
+paridad de la tabla~\ref{tab:plan-a}: la ganancia del diseño se sostiene con
+el modelo de la comparación. Frente al Plan A con \texttt{deepseek-chat} del
+25 de agosto queda $-1{,}1$ $[-2{,}2,-0{,}1]$, casi todo en inferencia
+($-6{,}5$, n.s.): el modelo adoptado sigue un punto por encima, y su medición
+con la v4 congelada queda pendiente en el momento de escribir esto.
+
+\emph{HotpotQA: la primera generalización.} Con el índice construido con el
+mismo procedimiento (OpenIE de $9\,811$ pasajes, $87\,629$ aserciones;
+diccionario de $48\,856$ entradas; grafo de $146\,274$ nodos y $311\,979$
+aristas) y la configuración v4 congelada ---ni un dial, ni una regla, ni una
+demostración cambiados---, la medición única del banco de HotpotQA con
+\texttt{gpt-4o-mini} da $\mathrm{R@}2$ $77{,}1$, $\mathrm{R@}5$ $94{,}7$,
+$\mathrm{FC@}5$ $90{,}2$ y $\mathrm{FC@}10$ $93{,}6$ (puente $93{,}6$ /
+$88{,}2$; comparación $99{,}5$ / $98{,}9$). Frente a las referencias
+publicadas con los mismos modelos (tabla~\ref{tab:otros-datasets}, fila
+añadida), supera a CatRAG en $+5{,}2$ de $\mathrm{R@}5$ y $+9{,}8$ de cadena
+completa, y a \hippo{} en $+7{,}6$ / $+14{,}7$; pareada frente a BM25 sobre el
+mismo corpus, $+40{,}7$ de $\mathrm{FC@}5$ $[+37{,}1,+44{,}1]$ (gana $432$,
+pierde $25$). H1 queda confirmada en el banco, no solo en el sondeo, y con un
+margen mayor que el previsto: la hipótesis pedía superar el $80{,}4$ de CatRAG
+con la v3, y la v4 lo supera en diez puntos. La distancia con el sondeo
+($97{,}5 \to 90{,}2$) es la del corpus cinco veces mayor: de los $98$
+fallos, $96$ son de puente y en $90$ falta un solo pasaje oro, el puente,
+que queda en los puestos 6--10 en $37$ casos, en 11--20 en $23$ y fuera
+del top-20 en $46$; las $35$ preguntas sin mayúsculas interiores fallan
+algo más ($6$, un $17\%$), señal de que el reconocimiento de entidades del
+analista debería preceder también a la frontera (L1 completo). La reproducción de
+\hippo{} sobre el corpus de HotpotQA para la comparación pareada queda
+pendiente.
+
+\subsection{Adaptación al asistente GeSIDA}
+\label{sec:adaptacion-gesida}
+
+La tabla~\ref{tab:gesida-wiki} fijó qué es patrón y qué es dominio. Lo
+que sigue es el plan de porte de los mecanismos validados en 2Wiki al
+asistente clínico, en el orden en que conviene ejecutarlo, con el efecto
+esperado y la forma de medirlo. El objetivo cuantitativo es el residuo
+duro medido en producción (sección~\ref{sec:gesida}): la precisión
+temprana ---todas@5 y sección@5 en los niveles 3--4--- sin perder la
+cobertura profunda que el modo grafo ya tiene ($84{,}9\%$ en nivel 4 a
+$k=20$). Tres restricciones lo enmarcan. Los datos clínicos no salen a
+proveedores sin garantías contractuales: queda excluido
+\texttt{deepseek-chat}, el modelo del Plan A en 2Wiki, y se usan los
+proveedores cubiertos por las garantías documentadas o un modelo local
+(la matriz del sondeo muestra que un modelo abierto de $20\,000$ millones
+de parámetros basta). La polaridad deóntica y la vigencia siguen siendo
+guardarraíles deterministas por encima de cualquier recuperador. Y
+ninguna decisión se ajusta sobre el banco completo de $505$ preguntas.
+
+\paragraph{Paso 0: que la medición mida lo desplegado.}
+La auditoría del repositorio dejó defectos que invalidan cualquier
+comparación previa: el reordenador neuronal no está en la imagen de
+despliegue (degradación silenciosa al orden de fusión); la evaluación de
+respuestas mide un recuperador denso directo, no el flujo de producción;
+la lente numérica comprueba el respaldo por subcadena (\guillemotleft{}50\guillemotright{} casa con
+\guillemotleft{}150\guillemotright{}); y la corrección anti-concentrador solo cuenta las aristas de
+mención, de modo que las entidades que solo aparecen en recomendaciones
+reciben semilla máxima. Se corrigen primero y se fija la línea de base
+con el flujo real sobre la muestra estratificada de $100$ y las $73$
+preguntas de nivel 4.
+
+\paragraph{Paso 1: filtro selector con compuerta dura.}
+Sustituir la compuerta blanda anti-concentrador ---la que en 2Wiki
+sembró homónimos--- por la memoria de reconocimiento con compuerta dura:
+un selector con demostraciones clínicas ---conservar los saltos
+intermedios (fármaco $\to$ clase $\to$ recomendación $\to$ población) y
+todos los candidatos de un papel--- sobre $\mathcal{K}(q)$ $=$ Top-40
+$\cup$ frontera de las entidades ancladas. Efecto esperado: precisión
+temprana, porque solo siembran las entidades de hechos juzgados útiles.
+Coste: una llamada por consulta. Se valida en la muestra de $100$ y en
+las $73$ de nivel 4 antes de tocar el flujo.
+
+\paragraph{Paso 2: la unidad propia clínica.}
+El pasaje propio no tiene equivalente directo: un fármaco no tiene
+\guillemotleft{}biografía\guillemotright{}. Su análogo son los nodos \emph{Recomendación} y los
+fragmentos de tabla posológica de la entidad: cada entidad sembrada
+deposita masa directa en sus recomendaciones vigentes (por la arista
+\textsc{mencionada\_en\_rec}, ya existente) y, para las clases, en las de
+sus miembros por IS-A. Se mide como en 2Wiki: qué fracción de las
+secciones oro entra por siembra directa y cuál por el paseo.
+
+\paragraph{Paso 3: memoria canónica como respaldo del anclaje terminológico.}
+El $70\%$ de las entidades sin SCTID sigue resolviéndose con aristas de
+sinonimia a umbral, el esquema cuyos fallos motivaron el diccionario. Se
+construye la memoria canónica sobre el corpus clínico ---fichas por
+mención con las frases de sus aserciones, dos canales, restricciones
+duras propias del dominio (dosis o vía distintas no son la misma
+entidad), juez estricto y cierre transitivo---, con la estrella por SCTID
+como fusión \emph{verificada} que la precede; y el enlazador de consulta
+se unifica en la cascada exacto $\to$ trigramas Dice $\to$ vector de
+nombre $\to$ juez (evolución L2), que el enlazador terminológico ya
+implementa en parte. Prerrequisitos que la auditoría dejó medidos: los
+alias de la extracción llegan vacíos y la normalización de mayúsculas
+rompe los acrónimos (\guillemotleft{}Vih\guillemotright{}, \guillemotleft{}Dtg\guillemotright{}); y los umbrales de coseno se
+recalibran en español con una muestra etiquetada, porque los de 2Wiki
+valen para inglés y \texttt{text-embedding-3-small}.
+
+\paragraph{Paso 4: analista, salto dirigido y conjunto con diversidad.}
+El Plan A se porta con la semántica del dominio: los huecos del plan son
+clínicos (fármaco, clase, población, polaridad, vigencia); los
+candidatos estructurales del salto dirigido son las aserciones de la
+sección y de las recomendaciones de la entidad; y la selección final de
+conjunto incorpora la diversidad por guía que hoy hace el reordenador
+(primero el mejor fragmento de cada guía implicada), de modo que un solo
+componente cubra ambas funciones. Los huecos sin cubrir son además una
+señal natural para la abstención y para la recuperación dirigida del
+verificador.
+
+\paragraph{Paso 5: lo que ya está y se conserva.}
+La modulación global de transiciones (origen del mecanismo), las
+semillas conceptuales IS-A y los sesgos por intención se mantienen; se
+añade la caché SQLite de llamadas adoptada en 2Wiki, que hace
+reproducibles las mediciones y estabiliza la varianza del verificador.
+Del análisis del código de \hippo{} se hereda un aviso para la fase
+incremental: su reindexado duplica las aristas de sinonimia; la vía es la
+consolidación nocturna por lotes, no el incremental ingenuo.
+
+\paragraph{Protocolo y expectativa.}
+Cada paso se mide de forma pareada sobre la muestra de $100$ y las $73$
+de nivel 4 (cobertura de guías y de secciones por nivel, alguna@1, MRR de
+guía), con intervalos bootstrap como en 2Wiki; el banco completo de
+$505$ se mide una sola vez al final. La expectativa, por analogía con la
+escalera de 2Wiki, es que el filtro con compuerta dura y la memoria
+canónica muevan la precisión temprana ---el análogo del salto de la v2 a
+la v3--- y que el Plan A mueva las preguntas multi-guía de nivel 4 ---el
+análogo del doble puente---. La validación clínica con patrón oro sigue
+siendo el paso previo a cualquier uso asistencial.
+
+\subsection{Generalización y comparación con otros conjuntos de datos}
+\label{sec:generalizacion}
+
+\paragraph{Conjuntos y referencias.}
+Los subconjuntos de reproducción publicados con \hippo{} para MuSiQue
+($1\,000$ preguntas, $11\,656$ pasajes; saltos etiquetados: $518$ de dos,
+$316$ de tres y $166$ de cuatro) y HotpotQA ($1\,000$ preguntas, $9\,811$
+pasajes; $811$ de puente y $189$ de comparación) están vendorizados junto
+al de 2Wiki y son exactamente los que usa CatRAG, de modo que sus números
+publicados con \texttt{gpt-4o-mini} + \texttt{text-embedding-3-small}
+son la referencia directa (tabla~\ref{tab:otros-datasets}). Las
+diferencias con 2Wiki que importan al método son tres. (i)~Profundidad:
+MuSiQue exige cadenas de tres y cuatro pasajes con un puente por
+eslabón, no dos cadenas de dos como comparación-puente, y ofrece la
+descomposición oro de cada pregunta (\texttt{question\_decomposition},
+con \guillemotleft{}\#1\guillemotright{} como comodín del puente), que permite medir por primera
+vez la \emph{calidad del plan} del analista y no solo la recuperación.
+(ii)~Corpus: HotpotQA y 2Wiki tienen un pasaje por título; MuSiQue tiene
+$647$ títulos repetidos ($11\,656$ pasajes, $9\,838$ títulos), de modo que
+el pasaje propio deja de ser único y debe definirse como el
+\emph{conjunto} de pasajes con el título de la entidad (masa repartida o
+completa: decisión a fijar en el sondeo). (iii)~Tipos: no existe la
+taxonomía de cuatro tipos; el enrutador léxico de 2Wiki no aplica.
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{Referencias publicadas por~\cite{catrag} en MuSiQue y HotpotQA
+con \texttt{gpt-4o-mini} + \texttt{text-embedding-3-small} (los mismos
+modelos de este trabajo) sobre los mismos subconjuntos de $1\,000$
+preguntas; FCR $=\mathrm{FC@}5$; F1 con lector Llama-3.3-70B. Última
+fila: \hippo{} con NV-Embed-v2 (7B), de~\cite{hipporag2}, como techo de
+hardware.}
+\label{tab:otros-datasets}
+\begin{tabular}{lcccccc}
+\toprule
+ & \multicolumn{3}{c}{MuSiQue} & \multicolumn{3}{c}{HotpotQA}\\
+\cmidrule(lr){2-4}\cmidrule(lr){5-7}
+sistema & $\mathrm{R@}5$ & FCR & F1 & $\mathrm{R@}5$ & FCR & F1\\
+\midrule
+BM25 & $31{,}6$ & $6{,}4$ & $22{,}9$ & $64{,}8$ & $38{,}3$ & $54{,}1$\\
+Contriever & $46{,}6$ & $11{,}3$ & $31{,}3$ & $75{,}3$ & $54{,}1$ & $62{,}3$\\
+GTR & $49{,}1$ & $15{,}0$ & $34{,}6$ & $73{,}9$ & $53{,}0$ & $62{,}8$\\
+denso \texttt{te3-small} & $55{,}4$ & $21{,}1$ & $36{,}1$ & $81{,}3$ & $64{,}9$ & $64{,}6$\\
+RAPTOR & $53{,}3$ & $19{,}6$ & $36{,}0$ & $79{,}5$ & $61{,}4$ & $64{,}4$\\
+\hippo{} & $61{,}4$ & $30{,}5$ & $43{,}2$ & $87{,}1$ & $75{,}5$ & $69{,}4$\\
+CatRAG & $64{,}9$ & $34{,}6$ & $45{,}0$ & $89{,}5$ & $80{,}4$ & $71{,}4$\\
+\textbf{Plan A v4 (este trabajo; \S\ref{sec:v4})} & --- & --- & --- & $\mathbf{94{,}7}$ & $\mathbf{90{,}2}$ & ---\\
+\midrule
+\hippo{} con NV-Embed-v2 (7B)~\cite{hipporag2} & $74{,}7$ & --- & --- & $96{,}3$ & --- & ---\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Qué debe generalizar y cómo.}
+Cuatro piezas de la versión evaluada son específicas de 2Wiki y se
+sustituyen por sus equivalentes generales antes de medir, con la
+configuración \emph{congelada} para los tres conjuntos (cero ajuste por
+conjunto de datos).
+\begin{enumerate}[leftmargin=1.6em, itemsep=2pt]
+\item \textbf{Enrutador.} Una única estrategia para todo: analista con
+  plan (Plan A) o, en la versión de paridad, filtro selector. La variante
+  de descomposición, que en 2Wiki solo servía a comparación, queda como
+  ablación; en HotpotQA la comparación se detecta con la única marca
+  general (\emph{are both / same}) o no se detecta, y la diferencia se
+  mide.
+\item \textbf{Enlazador.} Reconocimiento de entidades por el analista
+  (L1) y escalón 2 de nombre a nombre (L2) en lugar del recorte por
+  mayúsculas, que en MuSiQue ---preguntas largas, anidadas, con
+  menciones descriptivas (\guillemotleft{}the person who \dots\guillemotright{})--- fallaría más
+  que en 2Wiki.
+\item \textbf{Memoria canónica.} El patrón (ficha, dos canales,
+  restricciones, juez, cierre) es general; la heurística
+  título$\to$sujeto y el pasaje propio se conservan porque los tres
+  corpus son enciclopédicos, con el pasaje propio definido como conjunto
+  en MuSiQue. La auditoría con identificadores externos (E1) no es
+  posible en MuSiQue ni en HotpotQA, que no traen QIDs: la precisión de
+  fusión se estima con una muestra etiquetada por corpus.
+\item \textbf{Profundidad.} El grafo por capas no encadena saltos en el
+  paseo (sección~\ref{sec:ppr}): cada puente lo descubre el filtro y lo
+  siembra el pasaje propio. Para cadenas de tres y cuatro, el salto
+  dirigido pasa de una ronda a \emph{una por hueco pendiente} (a lo sumo
+  saltos$-1$ rondas) y el tope dinámico del analista crece con el número
+  de huecos. Es la única modificación del método motivada por un
+  conjunto nuevo, y se decide en el sondeo.
+\end{enumerate}
+
+\paragraph{Protocolo.}
+Idéntico al de la sección~\ref{sec:protocolo}: para cada conjunto, un
+sondeo de $200$ preguntas extraído del \emph{split} de entrenamiento
+etiquetado (disjunto de las $1\,000$) con su mini-corpus, para las
+decisiones anteriores; diales pre-registrados (los de 2Wiki); una única
+medición sobre las $1\,000$; \hippo{} reproducido con su código sobre los
+mismos corpus (dos llamadas por pasaje) para la comparación pareada; y
+las cifras de CatRAG como referencia externa. Métricas: $\mathrm{R@}5$ y
+$\mathrm{FC@}5$ ---y $\mathrm{FC@}10$, porque en MuSiQue una cadena de
+cuatro deja una sola posición de holgura a $k=5$, como
+comparación-puente---, desglosadas por número de saltos, y EM/F1/JSR
+cuando se añada el lector. Coste estimado con \texttt{gpt-4o-mini} en
+indexación ($21\,467$ pasajes, una llamada cada uno) y consulta
+($2\,000$ preguntas, $\sim 2$ llamadas): $15$--$20$~USD, la mitad de ellos
+la reproducción de \hippo{}.
+
+\paragraph{Hipótesis falsables.}
+\begin{enumerate}[leftmargin=1.6em, itemsep=1pt, label=H\arabic*.]
+\item En HotpotQA (dos saltos, $81\%$ de puente) la v3 supera la cadena
+  completa publicada de CatRAG ($80{,}4$) con los mismos modelos, porque
+  el segmento equivale al composicional de 2Wiki ($91{,}0$ frente a
+  $77{,}2$ de \hippo{}).
+\item En MuSiQue la ventaja se concentra en tres y cuatro saltos y
+  depende del salto dirigido: sin él, la cadena completa cae con la
+  profundidad según el modelo multiplicativo $p^{h}$; con rondas por
+  hueco se mantiene por encima de esa predicción, como ocurrió en el
+  doble puente de 2Wiki.
+\item La calidad del plan del analista, medida contra la descomposición
+  oro de MuSiQue (huecos correctos y en orden), predice la cadena
+  completa mejor que la afinidad máxima de la pregunta: el error residual
+  está en el plan, no en el grafo.
+\end{enumerate}
+El caso clínico (sección~\ref{sec:adaptacion-gesida}) es la
+generalización en la otra dirección ---corpus no enciclopédico, otro
+idioma, terminología externa--- y comparte con esta el mismo protocolo.
 
 % =========================================================================
 \section{Consideraciones de validez y limitaciones}
@@ -2271,11 +4318,22 @@ atacan exactamente este perfil y se validarán primero en el sondeo.
   comparación-puente que requieren al menos $4$). Las heurísticas léxicas
   (enrutador, tramos capitalizados del enlazador) no son causa medible de
   fallo en este conjunto, pero sí un límite de generalización a otros
-  idiomas y estilos de pregunta.
+  idiomas y estilos de pregunta. El respaldo vectorial del enlazador está
+  además inactivo en la práctica (acepta $3$ de $275$ tramos): en esos
+  casos el sistema evaluado se sostiene sobre el filtro y la presa densa,
+  y su corrección (sección~\ref{sec:linker}, evoluciones L1--L2) queda
+  pendiente.
 \item \textbf{Alcance.} Los resultados corresponden a un único conjunto de
   datos (2WikiMultihopQA) y a la métrica de recuperación; la extensión a
   MuSiQue y HotpotQA y la evaluación extremo a extremo de respuesta
-  (EM/F1 con lector compartido) están planificadas con el mismo protocolo.
+  (EM/F1 con lector compartido) están planificadas con el mismo protocolo
+  (sección~\ref{sec:generalizacion}).
+\item \textbf{Memoria canónica de entidades.} La heurística título$\to$sujeto
+  del diccionario está sobreaplicada ($1\,549$ uniones fuera de su caso
+  previsto, con parientes y secuelas fundidos; sección~\ref{sec:diccionario})
+  y la precisión de las fusiones no está medida; la auditoría con los
+  identificadores Wikidata del propio conjunto de datos y la corrección de la
+  heurística, con re-medición, quedan pendientes para la versión de archivo.
 \item \textbf{Reproducibilidad.} Todos los artefactos intermedios
   (extracción, diccionario, grafos, incrustaciones, resultados por
   pregunta) y las cachés de las llamadas al modelo se conservan; cada

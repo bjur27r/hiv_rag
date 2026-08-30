@@ -1,0 +1,343 @@
+{
+ "split": "benchmark",
+ "ver": "_v4",
+ "pares_oro": 2487,
+ "pares_oro_total": 3143,
+ "solo_cadena": true,
+ "vias": {
+  "alias": 2349,
+  "alias+oro": 71,
+  "sin": 45,
+  "ambiguo": 22
+ },
+ "mismo_nombre_distinto_qid": 6,
+ "unidades_resueltas": 2293,
+ "qids_distintos": 2281,
+ "entradas_tocadas": 2249,
+ "sobre_fusion": {
+  "n_entradas": 32,
+  "n_qids_implicados": 64
+ },
+ "infra_fusion": {
+  "n_qids": 6
+ },
+ "pares": {
+  "pares_misma_entrada": 32,
+  "pares_mismo_qid": 6,
+  "pares_correctos": 0,
+  "precision": 0.0,
+  "exhaustividad": 0.0,
+  "f1": 0.0
+ },
+ "atribucion": {
+  "origenes_en_caminos": {
+   "juez_vecinos": 22,
+   "juez_titulo_mencion": 12,
+   "auto_nombre": 8,
+   "auto_casi": 5,
+   "juez_titulo_sintetico_empate": 1,
+   "titulo_sintetico": 4
+  },
+  "origen_puente": {
+   "juez_vecinos": 9,
+   "juez_titulo_mencion": 8,
+   "auto_nombre": 8,
+   "auto_casi": 5,
+   "juez_titulo_sintetico_empate": 1,
+   "titulo_sintetico": 1
+  },
+  "sin_camino": 0
+ },
+ "ejemplos_sobre": [
+  {
+   "entrada": "can:leopoldo torres ríos",
+   "qids": [
+    [
+     "Q3229821",
+     "Leopoldo Torres Ríos"
+    ],
+    [
+     "Q716563",
+     "Leopoldo Torre Nilsson"
+    ]
+   ],
+   "origenes": {
+    "auto_nombre": 9,
+    "juez_vecinos": 1,
+    "juez_titulo_mencion": 1
+   }
+  },
+  {
+   "entrada": "can:princess maria-olympia of greece and denmark",
+   "qids": [
+    [
+     "Q152099",
+     "Constantine I of Greece"
+    ],
+    [
+     "Q232732",
+     "Princess Maria of Greece and Denmark"
+    ]
+   ],
+   "origenes": {
+    "auto_casi": 3,
+    "auto_nombre": 2,
+    "juez_vecinos": 9,
+    "juez_titulo_mencion": 1,
+    "juez_titulo_sintetico_empate": 1
+   }
+  },
+  {
+   "entrada": "can:william ii of dampierre",
+   "qids": [
+    [
+     "Q1557512",
+     "Guy II of Dampierre"
+    ],
+    [
+     "Q2066259",
+     "William II of Dampierre"
+    ]
+   ],
+   "origenes": {
+    "auto_nombre": 3,
+    "juez_vecinos": 2,
+    "juez_titulo_mencion": 1
+   }
+  },
+  {
+   "entrada": "can:george vii of imereti",
+   "qids": [
+    [
+     "Q2416424",
+     "Solomon II of Imereti"
+    ],
+    [
+     "Q2618516",
+     "George VII of Imereti"
+    ]
+   ],
+   "origenes": {
+    "auto_casi": 1,
+    "auto_nombre": 2,
+    "juez_titulo_mencion": 2
+   }
+  },
+  {
+   "entrada": "can:humphrey stafford, 1st duke of buckingham",
+   "qids": [
+    [
+     "Q1265605",
+     "Humphrey Stafford, 1st Duke of Buckingham"
+    ],
+    [
+     "Q1637267",
+     "Humphrey Stafford"
+    ]
+   ],
+   "origenes": {
+    "auto_nombre": 3,
+    "juez_vecinos": 1,
+    "juez_titulo_sintetico_empate": 1
+   }
+  },
+  {
+   "entrada": "can:john tyndall",
+   "qids": [
+    [
+     "Q18912661",
+     "Louisa Charlotte Tyndall"
+    ],
+    [
+     "Q360808",
+     "John Tyndall"
+    ]
+   ],
+   "origenes": {
+    "auto_nombre": 1,
+    "juez_titulo_mencion": 1
+   }
+  },
+  {
+   "entrada": "can:otto von habsburg",
+   "qids": [
+    [
+     "Q76343",
+     "Otto von Habsburg"
+    ],
+    [
+     "Q78515",
+     "Karl von Habsburg"
+    ]
+   ],
+   "origenes": {
+    "auto_nombre": 9,
+    "titulo_sintetico": 1,
+    "juez_vecinos": 9,
+    "juez_titulo_mencion": 1
+   }
+  },
+  {
+   "entrada": "can:thomas lyon-bowes, master of glamis",
+   "qids": [
+    [
+     "Q3990679",
+     "Thomas Lyon-Bowes, 11th Earl of Strathmore and Kinghorne"
+    ],
+    [
+     "Q533403",
+     "Thomas George Lyon-Bowes, Lord Glamis"
+    ]
+   ],
+   "origenes": {
+    "auto_nombre": 12,
+    "auto_casi": 1,
+    "titulo_sintetico": 3,
+    "juez_vecinos": 20
+   }
+  },
+  {
+   "entrada": "can:edsel ford",
+   "qids": [
+    [
+     "Q552844",
+     "Edsel Bryant Ford"
+    ],
+    [
+     "Q8768",
+     "Henry Ford"
+    ]
+   ],
+   "origenes": {
+    "auto_nombre": 45,
+    "titulo_sintetico": 1,
+    "juez_vecinos": 12,
+    "juez_titulo_mencion": 3
+   }
+  },
+  {
+   "entrada": "can:charles patin",
+   "qids": [
+    [
+     "Q503502",
+     "Charles Patin"
+    ],
+    [
+     "Q973855",
+     "Guy Patin"
+    ]
+   ],
+   "origenes": {
+    "auto_nombre": 2,
+    "juez_vecinos": 1
+   }
+  },
+  {
+   "entrada": "can:hamad bin isa al khalifa",
+   "qids": [
+    [
+     "Q309650",
+     "Isa bin Salman Al Khalifa"
+    ],
+    [
+     "Q57352",
+     "Hamad bin Isa bin Salman Al Khalifa"
+    ]
+   ],
+   "origenes": {
+    "auto_casi": 12,
+    "auto_nombre": 8,
+    "titulo_sintetico": 1,
+    "juez_vecinos": 14,
+    "juez_titulo_sintetico_empate": 1,
+    "juez_titulo_mencion": 1
+   }
+  },
+  {
+   "entrada": "can:frederick i, count palatine of simmern",
+   "qids": [
+    [
+     "Q67199",
+     "John I, Count Palatine of Simmern"
+    ],
+    [
+     "Q69975",
+     "Frederick I, Count Palatine of Simmern"
+    ]
+   ],
+   "origenes": {
+    "auto_nombre": 4,
+    "juez_vecinos": 1,
+    "juez_titulo_mencion": 1
+   }
+  }
+ ],
+ "ejemplos_infra": [
+  {
+   "qid": "Q51491",
+   "entradas": [
+    "can:michael curtiz",
+    "can:ralph nelson"
+   ],
+   "formas": [
+    "Michael Curtiz",
+    "Ralph Nelson"
+   ]
+  },
+  {
+   "qid": "Q16186861",
+   "entradas": [
+    "can:walfredo reyes jr.",
+    "can:zac dysert"
+   ],
+   "formas": [
+    "Walfredo Reyes Jr.",
+    "Zac Dysert"
+   ]
+  },
+  {
+   "qid": "Q60169300",
+   "entradas": [
+    "can:a texas steer",
+    "can:by the grace of god"
+   ],
+   "formas": [
+    "A Texas Steer",
+    "By the Grace of God (film)"
+   ]
+  },
+  {
+   "qid": "Q3794932",
+   "entradas": [
+    "can:the hideout",
+    "can:trieste mia!"
+   ],
+   "formas": [
+    "The Hideout (film)",
+    "Trieste mia!"
+   ]
+  },
+  {
+   "qid": "Q1559143",
+   "entradas": [
+    "can:michael curtiz",
+    "can:ralph nelson"
+   ],
+   "formas": [
+    "Michael Curtiz",
+    "Ralph Nelson"
+   ]
+  },
+  {
+   "qid": "Q8409",
+   "entradas": [
+    "can:alexander",
+    "can:alexander the great"
+   ],
+   "formas": [
+    "Alexander",
+    "Alexander the Great"
+   ]
+  }
+ ]
+}

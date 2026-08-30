@@ -1,0 +1,101 @@
+{
+ "A": "plan_v4_4omini_sondeo",
+ "B": "plan_v4a_4omini_sondeo",
+ "n": 200,
+ "metricas": {
+  "recall@2": {
+   "A": 0.7725,
+   "B": 0.7725,
+   "dif": 0.0,
+   "ic": [
+    0.0,
+    0.0
+   ],
+   "sig": "ns",
+   "gana": 0,
+   "pierde": 0
+  },
+  "recall@5": {
+   "A": 0.9875,
+   "B": 0.98625,
+   "dif": 0.00125,
+   "ic": [
+    0.0,
+    0.00375
+   ],
+   "sig": "ns",
+   "gana": 1,
+   "pierde": 0
+  },
+  "full_chain@5": {
+   "A": 0.97,
+   "B": 0.965,
+   "dif": 0.005,
+   "ic": [
+    0.0,
+    0.015
+   ],
+   "sig": "ns",
+   "gana": 1,
+   "pierde": 0
+  },
+  "full_chain@10": {
+   "A": 0.98,
+   "B": 0.98,
+   "dif": 0.0,
+   "ic": [
+    0.0,
+    0.0
+   ],
+   "sig": "ns",
+   "gana": 0,
+   "pierde": 0
+  },
+  "full_chain@20": {
+   "A": 0.985,
+   "B": 0.985,
+   "dif": 0.0,
+   "ic": [
+    0.0,
+    0.0
+   ],
+   "sig": "ns",
+   "gana": 0,
+   "pierde": 0
+  }
+ },
+ "por_tipo": {
+  "bridge_comparison": {
+   "dif": 0.02,
+   "ic": [
+    0.0,
+    0.06
+   ],
+   "sig": "ns"
+  },
+  "comparison": {
+   "dif": 0.0,
+   "ic": [
+    0.0,
+    0.0
+   ],
+   "sig": "ns"
+  },
+  "compositional": {
+   "dif": 0.0,
+   "ic": [
+    0.0,
+    0.0
+   ],
+   "sig": "ns"
+  },
+  "inference": {
+   "dif": 0.0,
+   "ic": [
+    0.0,
+    0.0
+   ],
+   "sig": "ns"
+  }
+ }
+}

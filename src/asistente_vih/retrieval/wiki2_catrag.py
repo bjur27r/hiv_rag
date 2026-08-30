@@ -33,10 +33,8 @@ _INVERTIR = ("HAS_INTERVENTION", "HAS_OUTCOME")
 
 
 def _cargar_corpus(split: str) -> list[dict]:
-    if split == "sondeo":
-        return json.loads((WIKI2_DIR / "sondeo_corpus.json").read_text(encoding="utf-8"))
-    from ..eval.wiki2 import CORPUS_PATH
-    return json.loads(CORPUS_PATH.read_text(encoding="utf-8"))
+    from ..eval.wiki2 import ruta_corpus
+    return json.loads(ruta_corpus(split).read_text(encoding="utf-8"))
 
 
 _ROL = (r"(director|screenwriter|performer|composer|producer|editor|star|"
@@ -56,6 +54,14 @@ def _plegar_alias(s: str) -> str:
     return " ".join(re.findall(r"[a-z0-9]+", s))
 
 
+def _plegar_con_desamb(s: str) -> str:
+    """Plegado que CONSERVA el contenido del parentesis ('The Girl of the Golden
+    West (1922 film)' -> 'the girl of the golden west 1922 film'): distingue
+    homonimos que _plegar_alias confunde."""
+    import re
+    return " ".join(re.findall(r"[a-z0-9]+", s.lower()))
+
+
 def spans_entidad(pregunta: str) -> list[str]:
     """Menciones candidatas: secuencias de palabras capitalizadas (con
     conectores en minuscula entre ellas) fuera de las palabras de pregunta.
@@ -64,8 +70,8 @@ def spans_entidad(pregunta: str) -> list[str]:
     import re
     spans, actual = [], []
     for tok in pregunta.strip().rstrip("?").split():
-        limpio = re.sub(r"['’]s$", "", tok.strip(",;:.\"'"))
-        base = limpio.strip("()")
+        limpio = tok.strip(",;:.\"'")
+        base = re.sub(r"['’][sS]$", "", limpio).strip("()")
         if base and (base[0].isupper() or base[0].isdigit()) and base.lower() not in _PAL_PREG:
             actual.append(limpio)
         elif actual and base.lower() in _CONECTORES:
@@ -81,6 +87,10 @@ def spans_entidad(pregunta: str) -> list[str]:
         while s and s[-1].lower() in _CONECTORES:
             s.pop()
         if s:
+            # El posesivo se quita solo al FINAL del tramo ("Lothair II's mother"
+            # -> "Lothair II"); dentro del tramo forma parte del nombre ("God's
+            # Gift to Women"), y el plegado lo trata como el alias del diccionario.
+            s[-1] = re.sub(r"['’][sS]$", "", s[-1])
             out.append(" ".join(s))
     return out
 
@@ -112,22 +122,41 @@ class Wiki2CatRAG:
 
     def __init__(self, split: str = "sondeo", variante: str = "lite",
                  modo: str = "balanceado", plano: bool = False,
-                 canonico: bool = False, peso_enlace: float = 0.5):
+                 canonico: bool = False, peso_enlace: float = 0.5,
+                 dicc: str = "", enlazador: str = "v3"):
         """canonico=True: grafo sobre el diccionario de entidades
-        (grafo_<split>_canon) + linker de menciones de la pregunta + masa
-        directa en el pasaje propio de cada entidad sembrada (peso_enlace)."""
+        (grafo_<split>_canon<dicc>) + linker de menciones de la pregunta + masa
+        directa en el pasaje propio de cada entidad sembrada (peso_enlace).
+        dicc: sufijo de version del diccionario ("" = v3, "_v4" = curado).
+        enlazador: 'v3' (alias exacto -> coseno tramo-ficha >= 0,80) o 'l2'
+        (alias exacto -> de nombre a nombre: Dice de trigramas >= 0,80 o
+        coseno de nombre >= 0,85, ficha como desempate; colisiones de alias
+        resueltas por ficha en vez de por orden de carga)."""
         self.split, self.variante, self.canonico = split, variante, canonico
-        self.peso_enlace = peso_enlace
-        sufijo = ("_canon" if canonico else "") + ("_plano" if plano else "")
+        self.peso_enlace, self.dicc, self.enlazador = peso_enlace, dicc, enlazador
+        sufijo = ("_canon" + dicc if canonico else "") + ("_plano" if plano else "")
         self.g = nx.read_graphml(WIKI2_DIR / f"grafo_{split}{sufijo}.graphml")
         self.client = OpenAI()
         self.entradas: dict[str, dict] = {}
-        self.alias_idx: dict[str, str] = {}
+        self.alias_idx: dict[str, str] = {}          # alias plegado -> primera entrada (v3)
+        self.alias_multi: dict[str, list[str]] = {}  # alias plegado -> todas las entradas
+        self.alias_desamb: dict[str, list[str]] = {} # alias con parentesis conservado -> entradas
+        self.alias_lista = None                      # indice L2 (perezoso)
         if canonico:
-            for e in json.loads((WIKI2_DIR / f"entidades_{split}.json").read_text(encoding="utf-8")):
+            for e in json.loads((WIKI2_DIR / f"entidades_{split}{dicc}.json").read_text(encoding="utf-8")):
                 self.entradas[e["id"]] = e
                 for al in e["alias"] + [e["nombre"]]:
-                    self.alias_idx.setdefault(_plegar_alias(al), e["id"])
+                    pl = _plegar_alias(al)
+                    if not pl:
+                        continue
+                    self.alias_idx.setdefault(pl, e["id"])
+                    lst = self.alias_multi.setdefault(pl, [])
+                    if e["id"] not in lst:
+                        lst.append(e["id"])
+                    if "(" in al:                        # forma con desambiguador
+                        lst2 = self.alias_desamb.setdefault(_plegar_con_desamb(al), [])
+                        if e["id"] not in lst2:
+                            lst2.append(e["id"])
         if modo == "grafo":
             self.peso_pasaje, self.dense_top_n, self.damping, self.eps = 0.0, 0, 0.85, 1.0
         elif modo == "paridad":
@@ -175,7 +204,7 @@ class Wiki2CatRAG:
         self.aser_ents = [[v for _, v, dd in self.g.out_edges(self.nodos[i], data=True)
                            if dd.get("tipo_relacion") in _INVERTIR] for i in pos]
 
-        ruta_ent = (WIKI2_DIR / f"emb_fichas_{split}.npz" if self.canonico
+        ruta_ent = (WIKI2_DIR / f"emb_fichas_{split}{self.dicc}.npz" if self.canonico
                     else WIKI2_DIR / f"emb_entidades_{split}.npz")
         de = np.load(ruta_ent, allow_pickle=False)
         self.ent_ids = list(de["ids"]); self.ent_emb = de["mat"]
@@ -290,39 +319,171 @@ Selected: [0, 1]
 
     # ------------------------------------------------------------ linker
 
+    _UMBRAL_FICHA = 0.80      # v3: coseno tramo-ficha
+    _UMBRAL_DICE = 0.80       # L2: Dice de trigramas sobre el alias plegado
+    _UMBRAL_NOMBRE = 0.85     # L2: coseno tramo-nombre del alias
+
+    def _embeber_textos(self, textos: list[str]) -> list[np.ndarray]:
+        r = self.client.embeddings.create(input=textos, model=MODELO_EMB)
+        out = []
+        for dat in r.data:
+            v = np.array(dat.embedding, dtype=np.float32)
+            out.append(v / max(np.linalg.norm(v), 1e-9))
+        return out
+
+    @staticmethod
+    def _trigramas(s: str) -> set[str]:
+        s = f" {s} "
+        return {s[i:i + 3] for i in range(len(s) - 2)}
+
+    def _preparar_alias(self) -> None:
+        """Indice del escalon 2 de nombre a nombre (L2): alias plegados,
+        trigramas para Dice e incrustacion del NOMBRE solo
+        (emb_alias_<split><dicc>.npz, cache; ~31 800 alias en el banco)."""
+        if self.alias_lista is not None:
+            return
+        self.alias_lista = sorted(self.alias_multi)
+        self.alias_tri = [self._trigramas(a) for a in self.alias_lista]
+        self.alias_len = np.array([len(t) for t in self.alias_tri], dtype=np.float32)
+        self.tri_idx: dict[str, list[int]] = {}
+        for i, tri in enumerate(self.alias_tri):
+            for t in tri:
+                self.tri_idx.setdefault(t, []).append(i)
+        ruta = WIKI2_DIR / f"emb_alias_{self.split}{self.dicc}.npz"
+        if ruta.exists():
+            d = np.load(ruta, allow_pickle=False)
+            if len(d["ids"]) == len(self.alias_lista) and all(
+                    a == b for a, b in zip(d["ids"], self.alias_lista)):
+                self.alias_emb = d["mat"]
+                return
+        mat = np.zeros((len(self.alias_lista), 1536), dtype=np.float32)
+        for i in range(0, len(self.alias_lista), 512):
+            for j, v in enumerate(self._embeber_textos(self.alias_lista[i:i + 512])):
+                mat[i + j] = v
+        np.savez_compressed(ruta, ids=np.array(self.alias_lista), mat=mat)
+        self.alias_emb = mat
+
+    def _dice_candidatos(self, texto_pleg: str, n: int = 5) -> list[tuple[int, float]]:
+        """Alias con mayor coeficiente de Dice de trigramas con el texto."""
+        tri = self._trigramas(texto_pleg)
+        cuenta: dict[int, int] = {}
+        for t in tri:
+            for i in self.tri_idx.get(t, ()):
+                cuenta[i] = cuenta.get(i, 0) + 1
+        if not cuenta:
+            return []
+        idx = np.fromiter(cuenta.keys(), dtype=np.int64)
+        inter = np.fromiter(cuenta.values(), dtype=np.float32)
+        dice = 2 * inter / (len(tri) + self.alias_len[idx])
+        orden = np.argsort(-dice)[:n]
+        return [(int(idx[o]), float(dice[o])) for o in orden]
+
+    def _exactos(self, texto: str) -> list[str]:
+        """Escalon 1: alias exacto tras plegado. Si el texto trae parentesis,
+        primero con el desambiguador conservado (L2/E7: 'X (1922 film)' no es
+        'X (1923 film)'); despues sin el (con y sin parentesis)."""
+        if "(" in texto and self.enlazador != "v3":
+            ids = [e for e in self.alias_desamb.get(_plegar_con_desamb(texto), ()) if e in self.idx]
+            if ids:
+                return ids
+        formas = [texto] + ([texto.split("(")[0]] if "(" in texto else [])
+        for forma in formas:
+            pl = _plegar_alias(forma)
+            if not pl:
+                continue
+            if self.enlazador == "v3":
+                eid = self.alias_idx.get(pl)
+                if eid and eid in self.idx:
+                    return [eid]
+            else:
+                ids = [e for e in self.alias_multi.get(pl, ()) if e in self.idx]
+                if ids:
+                    return ids
+        return []
+
+    def _desempatar(self, cands: list[str], v: np.ndarray) -> str:
+        """Entre entradas distintas con el mismo alias (o puntuacion), la de
+        ficha (nombre, alias, descripcion) mas afin al texto."""
+        con_pos = [(e, self.ent_pos[e]) for e in cands if e in self.ent_pos]
+        if not con_pos:
+            return cands[0]
+        s = self.ent_emb[[p for _, p in con_pos]] @ v
+        return con_pos[int(np.argmax(s))][0]
+
+    def _escalon2_nombre(self, texto: str, v: np.ndarray) -> str | None:
+        """L2: de nombre a nombre. Canal lexico: Dice de trigramas >= 0,80
+        sobre el alias plegado (captura truncamientos y erratas y penaliza la
+        palabra que falta: 'bad education movie' no es 'bad education'). Canal
+        vectorial: coseno de nombre >= 0,85, solo si el lexico no admite a
+        nadie (variantes sin superficie comun). Entre entradas a menos de 0,02
+        de la mejor del canal que decide, desempate por ficha."""
+        self._preparar_alias()
+        pl = _plegar_alias(texto)
+        if not pl:
+            return None
+        puntos: dict[str, float] = {}
+        for i, dice in self._dice_candidatos(pl):
+            if dice >= self._UMBRAL_DICE:
+                for e in self.alias_multi[self.alias_lista[i]]:
+                    puntos[e] = max(puntos.get(e, 0.0), dice)
+        puntos = {e: p for e, p in puntos.items() if e in self.idx}
+        if not puntos:
+            sc = self.alias_emb @ v
+            for i in np.argsort(-sc)[:5]:
+                if sc[i] >= self._UMBRAL_NOMBRE:
+                    for e in self.alias_multi[self.alias_lista[int(i)]]:
+                        puntos[e] = max(puntos.get(e, 0.0), float(sc[i]))
+            puntos = {e: p for e, p in puntos.items() if e in self.idx}
+        if not puntos:
+            return None
+        mejor = max(puntos.values())
+        empate = [e for e, p in puntos.items() if p >= mejor - 0.02]
+        return empate[0] if len(empate) == 1 else self._desempatar(empate, v)
+
+    def _enlazar_textos(self, textos: list[str]) -> list[str | None]:
+        """Enlaza cada texto (tramo de la pregunta o forma canonica devuelta
+        por el analista) a una entrada del diccionario: escalon 1 exacto y,
+        si falla o hay colision, escalon 2 segun `enlazador`. Una sola llamada
+        de incrustacion para todos los pendientes."""
+        out: list[str | None] = [None] * len(textos)
+        pendientes = []
+        for k, texto in enumerate(textos):
+            cands = self._exactos(texto)
+            if len(cands) == 1:
+                out[k] = cands[0]
+            elif texto.strip():
+                pendientes.append((k, cands))
+        if not pendientes:
+            return out
+        # v3 incrusta el tramo tal cual (contra fichas); L2, plegado (contra nombres)
+        entradas = [textos[k] if self.enlazador == "v3" else (_plegar_alias(textos[k]) or textos[k])
+                    for k, _ in pendientes]
+        for (k, cands), v in zip(pendientes, self._embeber_textos(entradas)):
+            if len(cands) > 1:
+                out[k] = self._desempatar(cands, v)
+            elif self.enlazador == "l2":
+                out[k] = self._escalon2_nombre(textos[k], v)
+            else:
+                sc = self.ent_emb @ v
+                j = int(np.argmax(sc))
+                if sc[j] >= self._UMBRAL_FICHA and self.ent_ids[j] in self.idx:
+                    out[k] = self.ent_ids[j]
+        return out
+
     def _enlazar_menciones(self, query: str) -> list[str]:
         """Primera etapa (solo canonico): menciones de la pregunta -> ids del
-        diccionario. Alias exacto (plegado, con/sin parentesis); si no, la
-        ficha mas afin por embedding del span (coseno >= 0.80)."""
+        diccionario (ver _enlazar_textos)."""
         if not self.canonico:
             return []
         import re
-        enlazadas, pendientes = [], []
         spans = []
         for span in spans_entidad(query):
             # 'A and B' / 'A or B': si el conjunto no es alias, probar las partes
-            if _plegar_alias(span) not in self.alias_idx and re.search(r"\s(and|or|&)\s", span):
+            if not self._exactos(span) and re.search(r"\s(and|or|&)\s", span):
                 spans.extend(p.strip() for p in re.split(r"\s(?:and|or|&)\s", span) if p.strip())
             else:
                 spans.append(span)
-        for span in spans:
-            eid = self.alias_idx.get(_plegar_alias(span))
-            if eid is None and "(" in span:
-                eid = self.alias_idx.get(_plegar_alias(span.split("(")[0]))
-            if eid and eid in self.idx:
-                enlazadas.append(eid)
-            else:
-                pendientes.append(span)
-        if pendientes:
-            r = self.client.embeddings.create(input=pendientes, model=MODELO_EMB)
-            for dat in r.data:
-                v = np.array(dat.embedding, dtype=np.float32)
-                v /= max(np.linalg.norm(v), 1e-9)
-                s = self.ent_emb @ v
-                j = int(np.argmax(s))
-                if s[j] >= 0.80 and self.ent_ids[j] in self.idx:
-                    enlazadas.append(self.ent_ids[j])
-        return list(dict.fromkeys(enlazadas))
+        return list(dict.fromkeys(e for e in self._enlazar_textos(spans) if e))
 
     def _frontera(self, enlazadas: list[str], sims: np.ndarray, por_ent: int = 15) -> list[int]:
         """Aserciones colgadas de las entidades enlazadas (frontera de las

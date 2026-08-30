@@ -5,7 +5,7 @@ reproducción de los papers (1.000 preguntas / 6.119 pasajes). Plan completo en
 la memoria del proyecto (`asistente-vih-plan-eval-2wiki`); hilos de origen:
 18-ago (0471eaa2) y 19-ago (e057f71d).
 
-**Última actualización**: 2026-08-25, cierre — Plan A ADOPTADO (benchmark R@5 98,5 / FC@5 96,9), ablaciones hechas, comparabilidad verificada al decimal con el paper de CatRAG. Ver "Para la próxima sesión (2026-08-26)".
+**Última actualización**: 2026-08-30, sprint de generalización EN CURSO (ver último apartado). Anterior: 2026-08-25, cierre — Plan A ADOPTADO (benchmark R@5 98,5 / FC@5 96,9), ablaciones hechas, comparabilidad verificada al decimal con el paper de CatRAG. Ver "Para la próxima sesión (2026-08-26)".
 
 ## Dónde está cada cosa
 
@@ -714,3 +714,97 @@ sondeo, mitad de coste); qwen3.6-27b descartado (67,5). Todo en rama
 subsección con estas ablaciones); pdflatex no está instalado; la franja
 nocturna de DeepSeek es 18:30-02:30 hora española; rotación de claves
 OpenAI/Anthropic sigue recomendada; VIH congelado en `main`.
+
+## Sprint de generalización previo a HotpotQA (2026-08-30) — EN CURSO
+
+Objetivo: corregir el índice y generalizar el Plan A antes de indexar otro
+conjunto; re-medir 2Wiki una sola vez (= cifra de archivo); congelar. Todo
+artefacto nuevo lleva sufijo `_v4`; la v3 queda intacta.
+
+**E1 — auditoría del diccionario con los QIDs del oro** (`eval/wiki2_auditoria.py`,
+$0; unidades = entidades de la cadena; la misma forma bajo dos QIDs es ruido
+del oro y se excluye):
+
+| diccionario | entradas | sobre-fundidas (≥2 QIDs) | infra (QID partido) | origen puente de la sobre-fusión |
+|---|---|---|---|---|
+| v3 (procedencia reproducida con `--legado`) | 26.960 | 74 de 2.211 tocadas (3,3 %) | 6 | título→sujeto no sintética 40, juez 19, nombre idéntico 16, casi idéntico 18 |
+| v4 (curado) | 27.957 | **32** | 6 | juez 11, nombre idéntico 7, casi idéntico 6, título→sujeto juzgada 6 |
+
+Cambios v4 en `ingest/wiki2_entidades.py`: procedencia de cada unión (E2);
+uniones de título con el título ya como mención propia → juez (rechazó
+893/1.549); empate de sujeto → juez; ficha-título hereda las fechas del sujeto
+(911 fichas); nombre base idéntico con desambiguador distinto → juez. Coste:
+2.299 adjudicaciones nuevas (~$0,05) + fichas (~$0,03).
+
+**L2 — enlazador de nombre a nombre** (`retrieval/wiki2_catrag.py`,
+`enlazador="l2"`): Dice de trigramas ≥0,80 manda (mide truncamientos), coseno
+de nombre ≥0,85 solo si el léxico no admite candidatos, ficha como desempate;
+colisiones de alias por ficha; posesivo solo al final del tramo. Prueba con
+títulos truncados del sondeo: 16/18 enlazados (v3: 4/18).
+
+**Plan A generalizado** (`retrieval/wiki2_plan.py`; el del 25-08 en git a72bde5):
+conjunto en todos los tipos, ancla explícita por hueco (candidatos
+estructurales del pasaje propio del ancla), menciones canónicas por L2, rondas
+de salto con re-planificación (≤3), demostraciones desde calibración. Lanzador:
+`eval/wiki2_correr.py`.
+
+**Sondeo 2Wiki (200, gpt-4o-mini = paridad), FC@5** — escalera del paquete:
+
+| configuración | R@5 | FC@5 | FC@10 | pareado FC@5 vs Plan A 25-08 |
+|---|---|---|---|---|
+| Plan A 25-08 (gpt-4o-mini) | 98,5 | 96,0 | 96,5 | — |
+| v4a: dicc curado (1.ª) + L2 + plan generalizado | 98,6 | 96,5 | 98,0 | +0,5 [−2,5, +3,5] ns |
+| v4a con enlazador v3 (`_enl3`) | 98,5 | 96,5 | 97,5 | L2 neutro en 2Wiki |
+| plan generalizado + L2 con diccionario **v3** (`_dicc3`) | 99,2 | 98,0 | 98,5 | +2,0 ns |
+| **v4 definitiva** (desambiguador en «casi idéntico»; escalón exacto con paréntesis) | **98,8** | **97,0** | 98,0 | +1,0 [−1,5, +4,0] ns (gana 5 / pierde 3) |
+
+Las 2 preguntas que separan v4 (97,0) del diccionario v3 (98,0) son ruido del oro
+que la sobre-fusión v3 acertaba por casualidad: «Evil Eyes» (el oro es «Mark
+Atkins (footballer)»: el dataset enlazó al futbolista como director) y «Lady
+Gouyi» (v3 fundía a Emperor Wu, su marido, con Emperor Zhao, su hijo y el oro).
+La 3.ª pérdida de v4a («The Girl of the Golden West (1922)») era un fallo real
+—cinco homónimas fundidas por «casi idéntico»— y está corregida en v4.
+
+**HotpotQA**: harness generalizado (`cargar_split`, prefijo `hotpot_`); sondeo
+de 200 (100 bridge / 100 comparison, nivel hard, train desde HF parquet;
+mini-corpus 1.990); BM25 banco R@5 72,8 / FC@5 49,5 (bridge 45,4 / comparison
+67,2); BM25 sondeo 77,2 / 58,5. Índice del sondeo hecho (OpenIE 17.025
+aserciones; diccionario 10.335 entradas; grafo 29.345 nodos). **Plan A v4 sobre
+el sondeo de HotpotQA (gpt-4o-mini, configuración congelada, cero ajuste): R@5
+98,8 / FC@5 97,5 (bridge 95,0 / comparison 100)** → H1 (§generalización)
+sostenida en el sondeo. Ablaciones en ese sondeo: salto dirigido +2,0 FC@5
+SIG (puente 91,0 → 95,0); conjunto final +4,0 R@2 SIG y +2 FC@5 en comparison
+(justifica ejecutarlo en todos los tipos). **BANCO de HotpotQA (1.000 × 9.811), medición única, configuración
+congelada, gpt-4o-mini**: índice 87.629 aserciones / 48.856 entradas / grafo
+146.274 nodos. **R@2 77,1 / R@5 94,7 / FC@5 90,2 / FC@10 93,6** (bridge 93,6 /
+88,2; comparison 99,5 / 98,9). Referencias publicadas con los mismos modelos
+(CatRAG, tabla 4.4): BM25 64,8/38,3 (nuestro 72,8/49,5), denso te3-small
+81,3/64,9, HippoRAG 2 87,1/75,5, CatRAG 89,5/80,4; HippoRAG 2 con NV-Embed-v2
+7B: R@5 96,3. → **+5,2 R@5 / +9,8 FC@5 sobre CatRAG** con cero ajuste al
+conjunto: H1 confirmada. Pareado vs BM25 +40,7 FC@5 SIG. Ficheros
+`plan_v4_4omini_hotpot_benchmark`. Pendiente: deepseek nocturno; HippoRAG 2
+reproducido sobre HotpotQA (≈$5) para el pareado, a decidir. Banco 2Wiki con gpt-4o-mini
+(paridad estricta) medido 11:36–12:41.
+
+**BANCO 2Wiki — Plan A v4, gpt-4o-mini (cifra de archivo en paridad estricta)**:
+
+| sistema (todos gpt-4o-mini + te3-small salvo indicación) | R@2 | R@5 | FC@5 | FC@10 | comp. / compos. / infer. / p.-comp. (FC@5) |
+|---|---|---|---|---|---|
+| HippoRAG 2 (su código) | 70,7 | 85,9 | 65,8 | 71,7 | 93,4 / 77,2 / 75,9 / 12,3 |
+| CatRAG publicado (Lau et al.) | — | 87,0 | 67,6 | — | — |
+| v3 (diccionario, 22-08) | 73,0 | 96,0 | 90,6 | 93,4 | 99,2 / 91,0 / 84,3 / 83,8 |
+| Plan A 25-08, deepseek-chat | 82,2 | 98,6 | 97,1 | 97,2 | 99,6 / 96,1 / 90,7 / 99,1 |
+| **Plan A v4, gpt-4o-mini** | **80,2** | **98,1** | **96,0** | **96,7** | 99,6 / 95,9 / 84,3 / 97,9 |
+
+Pareados (1.000, bootstrap): v4 − v3 FC@5 +5,4 [+3,7, +7,1] SIG (gana 67 /
+pierde 13; bridge_comparison +14,0, compositional +4,8 SIG; comparison,
+inference ns); v4 − HippoRAG 2 +30,2 [+27,2, +33,2] SIG (317/15; todos los
+tipos SIG salvo inference +8,3 ns); v4(gpt-4o-mini) − Plan A(deepseek) −1,1
+[−2,2, −0,1] SIG (9/20): el modelo adoptado sigue por encima, casi todo en
+inference (−6,5 ns). Ficheros `plan_v4_4omini_benchmark`, `pareado_plan_v4_4omini_benchmark__vs__*`.
+Pendiente: la misma medición con deepseek-chat (franja nocturna, visto bueno).
+
+**Pendiente**: banco 2Wiki con deepseek en franja nocturna (visto bueno del
+usuario; recomendación: diccionario v4); pareados; .tex; HotpotQA banco
+(diccionario, grafo, HippoRAG 2 a decidir). Trazabilidad paso a paso en
+`BITACORA_2026-08-30.md`.

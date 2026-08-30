@@ -15,6 +15,7 @@ artifacts/wiki2/*
 !artifacts/wiki2/BITACORA_*.md
 !artifacts/wiki2/auditoria_qid_*.json
 !artifacts/wiki2/pareado_*.json
+!artifacts/wiki2/control_*.json
 
 # Datos crudos (9,5 GB: guias PDF, banco, 2wiki) — fuera de git
 data/

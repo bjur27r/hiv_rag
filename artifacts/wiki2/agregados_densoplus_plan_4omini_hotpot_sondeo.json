@@ -1,0 +1,92 @@
+{
+ "nombre": "densoplus_plan_4omini_hotpot_sondeo",
+ "n": 200,
+ "por_tipo": {
+  "bridge": {
+   "n": 100,
+   "recall@2": 0.85,
+   "full_chain@2": 0.73,
+   "recall@5": 0.935,
+   "full_chain@5": 0.88,
+   "recall@10": 0.96,
+   "full_chain@10": 0.92,
+   "recall@20": 0.97,
+   "full_chain@20": 0.94
+  },
+  "comparison": {
+   "n": 100,
+   "recall@2": 0.975,
+   "full_chain@2": 0.95,
+   "recall@5": 1.0,
+   "full_chain@5": 1.0,
+   "recall@10": 1.0,
+   "full_chain@10": 1.0,
+   "recall@20": 1.0,
+   "full_chain@20": 1.0
+  }
+ },
+ "recall@2": 0.9125,
+ "full_chain@2": 0.84,
+ "recall@2_ic": [
+  0.8825,
+  0.94
+ ],
+ "full_chain@2_ic": [
+  0.785,
+  0.89
+ ],
+ "recall@5": 0.9675,
+ "full_chain@5": 0.94,
+ "recall@5_ic": [
+  0.9475,
+  0.985
+ ],
+ "full_chain@5_ic": [
+  0.905,
+  0.97
+ ],
+ "recall@10": 0.98,
+ "full_chain@10": 0.96,
+ "recall@10_ic": [
+  0.965,
+  0.9925
+ ],
+ "full_chain@10_ic": [
+  0.93,
+  0.985
+ ],
+ "recall@20": 0.985,
+ "full_chain@20": 0.97,
+ "recall@20_ic": [
+  0.9725,
+  0.995
+ ],
+ "full_chain@20_ic": [
+  0.945,
+  0.99
+ ],
+ "por_salto": {
+  "A sin puente": {
+   "n": 100,
+   "recall@2": 0.975,
+   "full_chain@2": 0.95,
+   "recall@5": 1.0,
+   "full_chain@5": 1.0,
+   "recall@10": 1.0,
+   "full_chain@10": 1.0,
+   "recall@20": 1.0,
+   "full_chain@20": 1.0
+  },
+  "B puente simple": {
+   "n": 100,
+   "recall@2": 0.85,
+   "full_chain@2": 0.73,
+   "recall@5": 0.935,
+   "full_chain@5": 0.88,
+   "recall@10": 0.96,
+   "full_chain@10": 0.92,
+   "recall@20": 0.97,
+   "full_chain@20": 0.94
+  }
+ }
+}

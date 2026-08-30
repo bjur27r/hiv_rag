@@ -795,6 +795,7 @@ reproducido sobre HotpotQA (≈$5) para el pareado, a decidir. Banco 2Wiki con g
 | v3 (diccionario, 22-08) | 73,0 | 96,0 | 90,6 | 93,4 | 99,2 / 91,0 / 84,3 / 83,8 |
 | Plan A 25-08, deepseek-chat | 82,2 | 98,6 | 97,1 | 97,2 | 99,6 / 96,1 / 90,7 / 99,1 |
 | **Plan A v4, gpt-4o-mini** | **80,2** | **98,1** | **96,0** | **96,7** | 99,6 / 95,9 / 84,3 / 97,9 |
+| **Plan A v4, deepseek-chat** (30-08 noche) | **84,2** | **98,9** | **97,7** | 97,8 | (ver agregados) |
 
 Pareados (1.000, bootstrap): v4 − v3 FC@5 +5,4 [+3,7, +7,1] SIG (gana 67 /
 pierde 13; bridge_comparison +14,0, compositional +4,8 SIG; comparison,
@@ -802,9 +803,43 @@ inference ns); v4 − HippoRAG 2 +30,2 [+27,2, +33,2] SIG (317/15; todos los
 tipos SIG salvo inference +8,3 ns); v4(gpt-4o-mini) − Plan A(deepseek) −1,1
 [−2,2, −0,1] SIG (9/20): el modelo adoptado sigue por encima, casi todo en
 inference (−6,5 ns). Ficheros `plan_v4_4omini_benchmark`, `pareado_plan_v4_4omini_benchmark__vs__*`.
-Pendiente: la misma medición con deepseek-chat (franja nocturna, visto bueno).
+Medición con deepseek-chat (30-08, 18:30–19:28): **R@2 84,2 / R@5 98,9 / FC@5 97,7 / FC@10 97,8**; pareados: vs v4 gpt-4o-mini +1,7 [+0,8,+2,7] SIG; vs Plan A deepseek 25-08 +0,6 ns; vs v3 +7,1 SIG; vs HippoRAG 2 +31,9 SIG (326/7). Ficheros `plan_v4_deepseek_benchmark`.
 
 **Pendiente**: banco 2Wiki con deepseek en franja nocturna (visto bueno del
 usuario; recomendación: diccionario v4); pareados; .tex; HotpotQA banco
 (diccionario, grafo, HippoRAG 2 a decidir). Trazabilidad paso a paso en
 `BITACORA_2026-08-30.md`.
+
+## Control sin grafo con el mismo presupuesto de LLM (2026-08-30, tarde)
+
+Pregunta: ¿lo que gana el Plan A v4 lo pone el grafo o el planificador? Control
+`retrieval/wiki2_plan_denso.py`: mismo analista/salto/conjunto, mismas consignas,
+demostraciones, topes, modelo y nº de llamadas; sin OpenIE, memoria, grafo ni
+PPR; candidatos = top-20 denso (mismo presupuesto de caracteres) + índice de
+títulos; orden = aprobados primero, luego coseno. Variantes: `denso` (títulos),
+`denso_puro`, `denso_plus` (post-hoc: re-planifica sin pasajes nuevos, anclas a
+700 car.). Criterio pre-registrado: ≥5 puntos de FC@5 y SIG en los dos bancos →
+el grafo aporta.
+
+| medición (gpt-4o-mini) | v4 FC@5 | control FC@5 | Δ v4−control [IC95] | solo v4 / solo control | oro perdido por el control fuera del top-20 |
+|---|---|---|---|---|---|
+| 2Wiki sondeo | 97,0 | 89,0 (puro 87,0; plus 91,0) | +8,0 [+4,5,+12,0] SIG | 17 / 1 | 17 de 18 |
+| HotpotQA sondeo | 97,5 | 93,5 (puro 94,5; plus 94,0) | +4,0 [+1,5,+7,0] SIG | 8 / 0 | 5 de 9 |
+| **2Wiki banco** | **96,0** | **83,3** | **+12,7 [+10,5,+14,9] SIG** | 135 / 8 | 130 de 141 |
+| **HotpotQA banco** | **90,2** | **83,9** | **+6,3 [+4,1,+8,6] SIG** | 99 / 36 | 63 de 103 |
+| 2Wiki banco, control plus | 96,0 | 86,4 | +9,6 [+7,6,+11,8] SIG | 107 / 11 | 105 de 111 |
+| HotpotQA banco, control plus | 90,2 | 85,1 | +5,1 [+2,9,+7,3] SIG | 89 / 38 | 58 de 93 |
+
+Por tipo (2Wiki banco): compositional +20,1, inference +15,7, bridge_comp +11,9
+SIG; comparison 0. Control vs v3 (grafo sin planificador, 90,6): −7,3 SIG → el
+grafo solo vale más que el planificador solo en puente simple. Control vs
+HippoRAG 2: +17,5 (bridge_comp +73,6; compositional −1,5 ns, inference −7,4 ns) →
+el planificador solo repara las cadenas dobles, no el puente simple. Mecanismo
+(traza «Too Many Wives»): el mismo modelo ve «directed by Ben Holmes» en prosa
+y escribe [X]; como aserción atómica lo aprueba y siembra la entidad → pasaje
+propio. El control gana en R@2/FC@2 (aprobados en cabeza; HotpotQA banco +5,0 /
++8,2 SIG) → mejora de orden temprano pendiente para la v4. En HotpotQA el control
+sin grafo ya supera a CatRAG (80,4) y HippoRAG 2 (75,5): de los +9,8 de la v4
+sobre CatRAG, +3,5 son del planificador y +6,3 de la representación (2Wiki:
++15,7 / +12,7). **Criterio pre-registrado (≥5 y SIG en ambos bancos): cumplido.**
+Memoria: `docs/control_sin_grafo.tex`.

@@ -1,0 +1,570 @@
+% =========================================================================
+% Memoria: control sin grafo con el mismo presupuesto de LLM.
+% ¿Lo que gana el Plan A v4 lo pone el grafo o lo pone el planificador?
+% Compilar: tectonic control_sin_grafo.tex
+% =========================================================================
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish,es-noshorthands,es-tabla]{babel}
+\usepackage{lmodern}
+\usepackage[margin=2.4cm]{geometry}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{caption}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+
+\newcommand{\sys}{\textsc{CatRAG-Reif}}
+\newcommand{\hippo}{HippoRAG~2}
+\newcommand{\gl}{\guillemotleft}
+\newcommand{\gr}{\guillemotright}
+\newcommand{\ctrl}{\textsc{Plan-Denso}}
+\setlength{\parskip}{2pt}
+
+\title{¿Grafo o planificador? Un control sin grafo con el mismo presupuesto
+de modelo de lenguaje para aislar la contribución de la representación en
+la recuperación multisalto}
+\author{}
+\date{30 de agosto de 2026}
+
+\begin{document}
+\maketitle
+\vspace{-2.5em}
+
+\begin{abstract}
+\noindent
+El sistema \sys{} v4 recupera cadenas completas en 2WikiMultihopQA y HotpotQA
+muy por encima de \hippo{} y CatRAG con los mismos modelos, pero su fase de
+consulta hace unas tres llamadas a un modelo de lenguaje por pregunta
+(analista, salto dirigido, selección de conjunto) frente a una de aquellos.
+La objeción es inmediata: lo que gana podría ponerlo el planificador y no el
+grafo de aserciones reificadas ni la memoria canónica de entidades. Esta
+memoria diseña y ejecuta el control que responde a esa objeción: un
+recuperador \emph{sin grafo} ---recuperación densa sobre pasajes con un
+índice de títulos--- que conserva \emph{exactamente} el mismo planificador,
+las mismas consignas, demostraciones, topes, modelo y número de llamadas, y
+sustituye cada pieza del grafo por su equivalente sin grafo. La metodología
+de análisis (pareado por pregunta, descomposición por tipo y estructura,
+contingencia de aciertos y localización del oro perdido) y los criterios de
+decisión se fijan antes de ver los resultados. En el banco de 2Wiki
+($1\,000$ preguntas) el control alcanza $\mathrm{R@}5$ $92{,}3$ y
+$\mathrm{FC@}5$ $83{,}3$ frente a $98{,}1$ y $96{,}0$ del sistema con
+grafo: $+12{,}7$ puntos de cadena completa a favor del grafo
+$[+10{,}5,+14{,}9]$, $135$ preguntas ganadas por $8$ perdidas, con la
+diferencia concentrada en las cadenas de puente simple ($+19{,}2$). El
+control queda incluso por debajo de la versión con grafo y sin planificador
+($90{,}6$), y el oro que pierde está fuera de su top-20 en $130$ de $141$
+casos: no es un fallo de orden sino de \emph{alcance}. En los sondeos
+retenidos la diferencia es significativa en los dos conjuntos ($+8{,}0$ y
+$+4{,}0$) y sobrevive a un refuerzo post-hoc del control ($+6{,}0$ y
+$+3{,}5$ en los sondeos; $+9{,}6$ y $+5{,}1$ en los bancos). La traza de un caso muestra el mecanismo: el mismo planificador
+lee el dato del puente en prosa y no lo usa, pero lo aprueba cuando es una
+aserción atómica que siembra una entidad con pasaje propio. La conclusión es
+que la representación aporta la parte mayor de la cadena completa y que el
+planificador, solo, repara las cadenas dobles pero no el puente simple; el
+control aporta además una mejora de orden temprano aplicable al sistema.
+En el banco de HotpotQA la diferencia es de $+6{,}3$ $[+4{,}1,+8{,}6]$
+($90{,}2$ frente a $83{,}9$), toda en las preguntas de puente; y el control
+sin grafo supera por sí solo a CatRAG ($80{,}4$) y \hippo{} ($75{,}5$)
+publicados con los mismos modelos, lo que reparte la ventaja del sistema
+completo entre planificador y representación.
+\end{abstract}
+
+% =========================================================================
+\section{La pregunta y por qué importa}
+\label{sec:pregunta}
+
+Los documentos de método sobre 2Wiki y sobre HotpotQA muestran que \sys{}
+v4 obtiene, con \texttt{gpt-4o-mini} y \texttt{text-embedding-3-small},
+$\mathrm{FC@}5$ $96{,}0$ en 2Wiki y $90{,}2$ en HotpotQA, frente a $67{,}6$
+y $80{,}4$ de CatRAG con los mismos modelos. Sus ablaciones atribuyen la
+ganancia sobre la versión sin planificador (v3: $90{,}6$ en 2Wiki) a tres
+mecanismos de consulta ---analista con plan, salto dirigido, selección de
+conjunto--- que son llamadas a un modelo de lenguaje. Un lector escéptico
+tiene derecho a preguntar si esos tres mecanismos, aplicados sobre un
+recuperador denso corriente, no darían lo mismo: si la representación
+(aserciones reificadas, memoria canónica, grafo por capas, paseo con
+reinicio) es necesaria o es decorado.
+
+La pregunta tiene dos respuestas posibles y las dos son publicables si se
+formulan antes de medir: o el grafo aporta una parte sustancial y medible de
+la cadena completa, y entonces el artículo defiende la representación; o no
+la aporta, y entonces el resultado es que un planificador con salto
+dirigido sobre recuperación densa basta, lo que es más barato de indexar y
+también vale la pena decir. Lo que no es aceptable es no hacer el
+experimento.
+
+% =========================================================================
+\section{Diseño del control}
+\label{sec:diseno}
+
+\subsection{Principio: mismo modelo de lenguaje, misma cantidad de él}
+
+El control, \ctrl{}, se construye por sustitución pieza a pieza a partir de
+\sys{} v4 (tabla~\ref{tab:sustitucion}). Todo lo que en v4 es modelo de
+lenguaje se conserva sin cambiar una palabra que no sea obligada por el
+cambio de unidad (\gl{}hecho\gr{} $\to$ \gl{}pasaje\gr{}): la consigna del
+analista con sus reglas y sus dos demostraciones derivadas de la
+calibración de 2Wiki, la del salto dirigido, la de la selección de
+conjunto, el tope dinámico de selección $\min(8,\max(2,|\text{plan}|))$, el
+máximo de cuatro huecos, las tres rondas, la guarda del top-2, el modelo
+\texttt{gpt-4o-mini} a temperatura cero. Todo lo que en v4 es grafo se
+retira: la extracción de aserciones, la memoria canónica, el grafo, la
+frontera y el paseo con reinicio.
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{Sustitución pieza a pieza. En cursiva, lo que el control retira.}
+\label{tab:sustitucion}
+\begin{tabular}{p{0.19\textwidth}p{0.38\textwidth}p{0.38\textwidth}}
+\toprule
+etapa & \sys{} v4 (grafo) & \ctrl{} (control)\\
+\midrule
+índice & OpenIE reificado; memoria canónica; grafo por capas; vectores de aserción, entrada, pasaje y alias & vectores de pasaje (los mismos que usa la presa densa de v4) e índice de títulos plegados\\
+anclaje de la pregunta & tramos $\to$ alias exacto / L2 $\to$ entrada canónica $\to$ pasaje propio & tramos $\to$ título exacto (con y sin desambiguador) $\to$ pasaje; sin memoria\\
+candidatos del analista & Top-40 hechos por coseno $\cup$ frontera de las entidades enlazadas ($40 \times 130$ caracteres) & Top-20 pasajes por coseno, forzando los pasajes-título ($20 \times 260$ caracteres: mismo presupuesto)\\
+analista & plan, hechos seleccionados, huecos con ancla & plan, pasajes seleccionados, huecos con ancla (misma consigna, mismas demostraciones sobre pasajes)\\
+siembra y paseo & entidades de los hechos aprobados + pasaje propio + presa densa + anclas; PPR con transiciones moduladas & \emph{ninguno}: orden = pasajes aprobados primero, luego pasajes-ancla, luego el resto por coseno\\
+salto dirigido & hueco $\to$ aserciones del pasaje propio del ancla + coseno del hueco sobre hechos $\to$ mini-filtro & hueco $\to$ pasaje cuyo título es el ancla + coseno del hueco sobre pasajes $\to$ mini-filtro (misma consigna)\\
+rondas & re-planificación si quedan comodines $[X]$ (máx.\ 3) & igual\\
+selección de conjunto & 5 de los 12 primeros del paseo & 5 de los 12 primeros del orden (misma consigna)\\
+llamadas por pregunta & $\approx 3$ & $\approx 3$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Dos variantes}
+
+\ctrl{} con \emph{índice de títulos} (variante principal): las menciones de
+la pregunta y las formas canónicas que devuelve el analista se buscan como
+títulos de pasaje, y el pasaje encontrado se fuerza como candidato y como
+ancla. Es un mecanismo corriente sin grafo ---cualquier sistema sobre
+Wikipedia lo tiene--- y equivale al \gl{}pasaje propio\gr{} de v4 sin
+diccionario. Es la variante conservadora para nuestra tesis: si el grafo
+aporta algo, debe aportarlo por encima de ella. \ctrl{} \emph{denso puro}:
+sin índice de títulos; solo cosenos. Mide cuánto de la ventaja del control
+depende del título, y sirve de suelo de la comparación.
+
+\subsection{Paridad de presupuesto}
+
+El analista de v4 lee unos $40$ hechos de hasta $130$ caracteres
+($5\,200$); el del control, $20$ pasajes de hasta $260$ ($5\,200$). El salto
+de v4 muestra hasta $16$ hechos de $120$; el del control, hasta $12$
+pasajes de $320$. La selección de conjunto es idéntica. El número de
+llamadas es el mismo en estructura (una de analista, una de salto por ronda
+con huecos, una de conjunto) y se registra en cada medición. El coste de
+\emph{indexación} no es paritario por construcción: el control no indexa
+nada más que los vectores de pasaje, y esa asimetría es parte de lo que se
+mide.
+
+% =========================================================================
+\section{Metodología de análisis}
+\label{sec:analisis}
+
+\paragraph{Datos.}
+Los mismos dos bancos y sondeos de los documentos anteriores: 2Wiki
+($1\,000$ / corpus $6\,119$; sondeo $200$) y HotpotQA ($1\,000$ / $9\,811$;
+sondeo $200$). Ninguna decisión del control se toma sobre los bancos; el
+control no tiene diales que ajustar más allá de los heredados.
+
+\paragraph{Medidas.}
+$\mathrm{R@}k$ y $\mathrm{FC@}k$, $k\in\{2,5,10,20\}$, con intervalos
+\emph{bootstrap}. La comparación principal es la \emph{pareada} v4 $-$
+control sobre las mismas preguntas: diferencia media de $\mathrm{FC@}5$ con
+IC del $95\%$ y recuento de preguntas ganadas y perdidas.
+
+\paragraph{Descomposición.}
+(1) Por tipo y por estructura de salto (2Wiki: sin puente / puente simple /
+doble puente; HotpotQA: comparación / puente). (2) Tabla de contingencia
+de $\mathrm{FC@}5$: ambos aciertan, solo v4, solo control, ninguno. (3) En
+las preguntas que solo acierta la v4, dónde deja el control el oro que le
+falta: puestos 6--10 u 11--20 (fallo de \emph{orden}: el pasaje estaba entre
+sus candidatos y no lo subió) o fuera del top-20 (fallo de \emph{alcance}:
+no lo encontró ni por coseno ni por título). La misma lectura al revés para
+las que solo acierta el control. (4) Coste: llamadas nuevas por medición y
+tiempo.
+
+\paragraph{Criterios de decisión, fijados antes de medir.}
+Sobre la diferencia pareada de $\mathrm{FC@}5$ en cada banco:
+\begin{itemize}[leftmargin=1.6em, itemsep=1pt]
+\item si es $\ge 5$ puntos y significativa en los dos bancos, el grafo
+  aporta una parte sustancial de la cadena completa y la tesis de la
+  representación se sostiene;
+\item si es $\le 2$ puntos o su intervalo incluye el cero en los dos bancos,
+  el grafo no aporta lo que se le atribuía: el planificador basta, y el
+  artículo debe reformularse en torno al planificador con salto dirigido;
+\item entre medias, o discordante entre bancos, la respuesta la da la
+  descomposición: qué tipo o estructura explica la diferencia y si el fallo
+  del control es de orden o de alcance.
+\end{itemize}
+Se registra además la variante densa pura para saber qué parte de la
+ventaja del control, si la tiene, depende del índice de títulos.
+
+% =========================================================================
+\section{Resultados}
+\label{sec:resultados}
+
+\subsection{Sondeos}
+\label{sec:sondeos}
+
+La tabla~\ref{tab:sondeos} recoge los dos sondeos ($200$ preguntas cada
+uno) para la v4 y las tres variantes del control, con la diferencia pareada
+de $\mathrm{FC@}5$ (v4 $-$ control) y su descomposición. Tres lecturas.
+
+\emph{La diferencia existe y es significativa en los dos conjuntos.} Frente
+al control con índice de títulos, la v4 gana $+8{,}0$ puntos de
+$\mathrm{FC@}5$ en 2Wiki $[+4{,}5,+12{,}0]$ y $+4{,}0$ en HotpotQA
+$[+1{,}5,+7{,}0]$; frente al denso puro, $+10{,}0$ y $+3{,}0$. Las preguntas
+que decide son casi todas de un lado: en 2Wiki la v4 acierta $17$ que el
+control falla y el control acierta $1$ que la v4 falla; en HotpotQA, $8$
+contra $0$. Toda la diferencia está en los tipos con puente: composicional
+$+14{,}0$, comparación-puente $+10{,}0$, inferencia $+8{,}0$ (2Wiki),
+puente $+8{,}0$ (HotpotQA); en comparación, sin puente, los dos sistemas
+saturan al $100$.
+
+\emph{El fallo del control es de alcance, no de orden.} En las preguntas que
+solo la v4 acierta, el pasaje que al control le falta está \emph{fuera de
+su top-20} en $17$ de $18$ casos en 2Wiki y en $5$ de $9$ en HotpotQA. Es
+la firma de un sistema que no tiene camino del ancla al puente: lo que no
+entra en la fase de análisis no aparece después, y por eso el control
+apenas mejora de $k{=}5$ a $k{=}20$ ($89{,}0 \to 90{,}0$) mientras la v4
+sigue subiendo ($97{,}0 \to 98{,}5$).
+
+\emph{El control gana en orden temprano.} En $\mathrm{R@}2$ y
+$\mathrm{FC@}2$ el control queda por encima (2Wiki $+3{,}0$, n.s.; HotpotQA
+$+4{,}0$ y $+8{,}0$, significativos): coloca los pasajes aprobados por el
+analista en cabeza, mientras que la v4 los deja al orden del paseo, que
+diluye. Es una mejora barata y sin coste de llamadas para la v4
+(sección~\ref{sec:discusion}).
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{Sondeos ($200$; \texttt{gpt-4o-mini}). $\Delta$: diferencia
+pareada v4 $-$ control de $\mathrm{FC@}5$ (IC del $95\%$; preguntas que solo
+acierta la v4 / solo el control). \gl{}Fuera\gr{}: de los oros que el control
+pierde en preguntas que la v4 acierta, cuántos están fuera de su top-20.}
+\label{tab:sondeos}
+\begin{tabular}{llcccccl}
+\toprule
+conjunto & sistema & $\mathrm{R@}2$ & $\mathrm{R@}5$ & $\mathrm{FC@}2$ & $\mathrm{FC@}5$ & $\mathrm{FC@}10$ & $\Delta$ $\mathrm{FC@}5$ (solo v4 / solo control; fuera)\\
+\midrule
+2Wiki & \sys{} v4 & $77{,}2$ & $98{,}8$ & $57{,}0$ & $\mathbf{97{,}0}$ & $98{,}0$ & ---\\
+ & \ctrl{} con títulos & $80{,}2$ & $95{,}2$ & $61{,}5$ & $89{,}0$ & $89{,}5$ & $+8{,}0$ $[+4{,}5,+12{,}0]$ (17/1; 17 de 18)\\
+ & \ctrl{} denso puro & $80{,}2$ & $94{,}4$ & $61{,}5$ & $87{,}0$ & $87{,}5$ & $+10{,}0$ $[+6{,}0,+14{,}5]$ (21/1; 22 de 23)\\
+ & \ctrl{} plus (post-hoc) & $80{,}2$ & $96{,}1$ & $61{,}5$ & $91{,}0$ & $91{,}5$ & $+6{,}0$ $[+3{,}0,+10{,}0]$ (13/1; 12 de 13)\\
+\midrule
+HotpotQA & \sys{} v4 & $87{,}0$ & $98{,}8$ & $75{,}5$ & $\mathbf{97{,}5}$ & $98{,}0$ & ---\\
+ & \ctrl{} con títulos & $91{,}0$ & $96{,}5$ & $83{,}5$ & $93{,}5$ & $95{,}5$ & $+4{,}0$ $[+1{,}5,+7{,}0]$ (8/0; 5 de 9)\\
+ & \ctrl{} denso puro & $89{,}5$ & $97{,}2$ & $81{,}0$ & $94{,}5$ & $95{,}5$ & $+3{,}0$ $[+0{,}5,+6{,}0]$ (7/1; 5 de 7)\\
+ & \ctrl{} plus (post-hoc) & $91{,}2$ & $96{,}8$ & $84{,}0$ & $94{,}0$ & $96{,}0$ & $+3{,}5$ $[+1{,}0,+6{,}5]$ (8/1; 5 de 9)\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{El mecanismo, en una pregunta}
+\label{sec:mecanismo}
+
+Antes de fortalecer el control conviene ver \emph{por qué} falla. De los
+$18$ oros que pierde en 2Wiki, $9$ están nombrados en el pasaje-ancla
+\emph{antes} del carácter $320$ ---es decir, a la vista del analista y del
+mini-filtro---, $2$ después, y $6$ corresponden a preguntas sin ancla de
+título. La traza de \gl{}\emph{Which film has the director died later, The
+Trip to Bountiful or Too Many Wives?}\gr{} es representativa: el control
+fuerza los dos pasajes-título, el analista lee \gl{}Too Many Wives is a 1937
+American comedy film directed by Ben Holmes\gr{} en el fragmento y aun así
+escribe el plan con \gl{}director of Too Many Wives $\to$ [X]\gr{}; el salto
+recibe el hueco con ancla \gl{}Too Many Wives\gr{}, pero el pasaje-ancla ya
+está aprobado y no puede volver a mostrarse, el coseno del hueco no trae
+la biografía de Ben Holmes (puesto $157$ por coseno) y el mini-filtro no
+selecciona nada; sin pasajes nuevos, el bucle termina sin re-planificar.
+En la v4 el mismo dato es un \emph{hecho atómico} ---\gl{}Too Many Wives
+was directed by Ben Holmes\gr{}--- entre los candidatos estructurales del
+salto: el mini-filtro lo aprueba, la siembra deposita masa en
+\texttt{can:ben holmes} y en su pasaje propio, y la biografía entra en el
+top-5. La ventaja no está en el planificador, que es idéntico, sino en la
+\emph{unidad}: una aserción reificada es más fácil de seleccionar que una
+frase enterrada en prosa, y una entidad canónica con pasaje propio convierte
+la selección en recuperación sin necesidad de una segunda búsqueda.
+
+Esa lectura sugiere el refuerzo post-hoc \ctrl{} \emph{plus}: cuando tras un
+salto quedan huecos con comodín, el analista re-planifica aunque el salto no
+haya aportado nada, viendo los pasajes-ancla completos (hasta $700$
+caracteres). Recupera $2$ puntos en 2Wiki ($89{,}0 \to 91{,}0$) y medio en
+HotpotQA ($93{,}5 \to 94{,}0$), con $61$ y $13$ llamadas adicionales
+respectivamente; la diferencia con la v4 se mantiene significativa
+($+6{,}0$ y $+3{,}5$) y el oro perdido sigue fuera de su top-20 ($12$ de
+$13$). El refuerzo no estaba pre-registrado y se presenta como lo que es:
+un intento de hacer perder al grafo que no lo consiguió.
+
+\subsection{Banco de 2Wiki}
+\label{sec:banco2wiki}
+
+La tabla~\ref{tab:banco2wiki} sitúa el control junto a los cuatro sistemas
+ya medidos sobre las mismas $1\,000$ preguntas y el mismo corpus, todos con
+\texttt{gpt-4o-mini} y \texttt{text-embedding-3-small}: BM25, \hippo{}
+reproducido con su código, la v3 (grafo y memoria canónica \emph{sin}
+planificador: filtro de una llamada) y la v4 (grafo \emph{con}
+planificador). El control hizo exactamente las mismas llamadas nuevas que
+la v4 en su medición ($3\,302$) y tardó lo mismo ($63$ frente a $65$
+minutos): la paridad de presupuesto se cumple también en la práctica.
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{Banco de 2Wiki ($1\,000$ preguntas, corpus $6\,119$;
+\texttt{gpt-4o-mini} + \texttt{text-embedding-3-small}). Última columna:
+$\mathrm{FC@}5$ por tipo (comparación / composicional / inferencia /
+comparación-puente).}
+\label{tab:banco2wiki}
+\begin{tabular}{lcccccl}
+\toprule
+sistema & grafo & planif. & $\mathrm{R@}2$ & $\mathrm{R@}5$ & $\mathrm{FC@}5$ & $\mathrm{FC@}5$ por tipo\\
+\midrule
+BM25 & --- & --- & --- & $65{,}8$ & $32{,}8$ & $86{,}5$ / $\;\,9{,}2$ / $23{,}1$ / $\;\,0{,}9$\\
+\hippo{} (su código) & sí & no & $70{,}7$ & $85{,}9$ & $65{,}8$ & $93{,}4$ / $77{,}2$ / $75{,}9$ / $12{,}3$\\
+\ctrl{} con títulos (control) & \textbf{no} & \textbf{sí} & $79{,}2$ & $92{,}3$ & $83{,}3$ & $100$ / $75{,}8$ / $68{,}5$ / $86{,}0$\\
+\ctrl{} plus (control reforzado, post-hoc) & \textbf{no} & \textbf{sí} & $80{,}2$ & $93{,}6$ & $86{,}4$ & $100$ / $80{,}4$ / $69{,}4$ / $90{,}6$\\
+\sys{} v3 & sí & no & $73{,}0$ & $96{,}0$ & $90{,}6$ & $99{,}2$ / $91{,}0$ / $84{,}3$ / $83{,}8$\\
+\sys{} v4 & sí & sí & $80{,}2$ & $98{,}1$ & $\mathbf{96{,}0}$ & $99{,}6$ / $95{,}9$ / $84{,}3$ / $97{,}9$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Grafo con planificador frente a planificador sin grafo.}
+Pareada, la v4 supera al control en $\mathrm{FC@}5$ por $+12{,}7$
+$[+10{,}5,+14{,}9]$: gana $135$ preguntas y pierde $8$ (ambos aciertan
+$825$, ninguno $32$). En $\mathrm{R@}5$, $+5{,}8$ $[+4{,}8,+6{,}8]$; en
+$\mathrm{R@}2$, $+1{,}0$ (n.s.): a $k{=}2$ el control, que coloca en cabeza
+lo que el analista aprueba, iguala al paseo. Por tipo, la diferencia es
+nula en comparación (los dos al $100$) y grande en los tres tipos con
+puente: composicional $+20{,}1$ $[+16{,}0,+24{,}5]$, inferencia $+15{,}7$
+$[+8{,}3,+24{,}1]$ y comparación-puente $+11{,}9$ $[+7{,}7,+16{,}2]$; por
+estructura, el puente simple concentra la ventaja ($+19{,}2$
+$[+15{,}7,+22{,}8]$ sobre $521$ preguntas). De los $141$ pasajes oro que el
+control pierde en las preguntas que la v4 acierta, $130$ están fuera de
+su top-20, $7$ entre los puestos 11--20 y $4$ entre 6--10: en el $92\%$ de
+los casos el control no llegó al pasaje; en las $8$ preguntas que solo
+acierta el control, la v4 lo tenía cerca ($4$ fuera, $3$ en 6--10, $1$ en
+11--20). El criterio pre-registrado ---al menos cinco puntos y
+significativo--- se cumple con holgura.
+
+\paragraph{Grafo sin planificador frente a planificador sin grafo.}
+La comparación más informativa es la del control con la v3, porque separa
+las dos piezas: la v3 tiene la representación y una sola llamada de
+filtro; el control tiene el planificador completo y ninguna
+representación. La v3 gana: $\mathrm{FC@}5$ $90{,}6$ frente a $83{,}3$,
+pareado $+7{,}3$ $[+4{,}8,+9{,}9]$ ($125$ contra $52$), con composicional
+$+15{,}3$ e inferencia $+15{,}7$ significativos y comparación-puente en
+empate ($-2{,}1$, n.s.). Es decir: \emph{en las cadenas de puente simple,
+el grafo solo vale más que el planificador solo}; en las cadenas dobles,
+que el documento de 2Wiki identificó como el segmento donde el filtro de
+una llamada se quedaba corto, el planificador solo iguala al grafo solo. Y
+las dos piezas juntas ($96{,}0$) superan a cada una por separado: la v4
+mejora a la v3 en $+5{,}4$ y al control en $+12{,}7$.
+
+\paragraph{Qué repara el planificador y qué no.}
+Frente a \hippo{}, el control gana $+17{,}5$ de $\mathrm{FC@}5$
+$[+14{,}1,+20{,}9]$, pero la ganancia está casi entera en comparación-puente
+($+73{,}6$) y comparación ($+6{,}6$); en composicional ($-1{,}5$, n.s.) e
+inferencia ($-7{,}4$, n.s.) un planificador sobre recuperación densa no
+mejora al paseo de \hippo{} sobre su grafo de entidades. La lectura es
+consistente con lo anterior: el planificador resuelve la \emph{asignación
+de recursos por cadena} (dos cadenas de dos saltos, cada una con su hueco),
+que es el defecto estructural de los paseos con presupuesto fijo, pero no
+resuelve el \emph{salto} en sí ---llegar de la entidad ancla al pasaje del
+puente--- cuando la pregunta no lo nombra. Eso lo hace la representación.
+
+\subsection{Banco de HotpotQA}
+\label{sec:bancohotpot}
+
+La tabla~\ref{tab:bancohotpot} repite el ejercicio en HotpotQA, donde las
+referencias con grafo son las publicadas por CatRAG y \hippo{} con los
+mismos modelos. El control alcanza $\mathrm{R@}5$ $91{,}3$ y
+$\mathrm{FC@}5$ $83{,}9$ ($2\,894$ llamadas nuevas, $55$ minutos; la v4:
+$2\,982$ y $62$): pareada, la v4 gana $+6{,}3$ $[+4{,}1,+8{,}6]$ ($99$
+preguntas contra $36$; ambos aciertan $803$, ninguno $62$), toda la
+diferencia en puente ($+7{,}9$ $[+5{,}2,+10{,}6]$) y ninguna en comparación
+($-0{,}5$, n.s.). En $\mathrm{R@}2$ el control supera a la v4 por $+5{,}0$
+$[+2{,}9,+6{,}9]$, y en $\mathrm{FC@}2$ por $+8{,}2$: la ventaja de orden
+temprano que ya se vio en el sondeo es aquí significativa y grande. De los
+$103$ oros que el control pierde en preguntas que la v4 acierta, $63$
+están fuera de su top-20, $18$ entre 11--20 y $22$ entre 6--10: el fallo de
+alcance sigue siendo mayoritario ($61\%$) pero menos abrumador que en 2Wiki
+($92\%$), y las $36$ preguntas que solo acierta el control dejan a la v4
+el oro cerca ($15$ en 6--10, $12$ en 11--20, $11$ fuera). El criterio
+pre-registrado se cumple también aquí: más de cinco puntos, significativo,
+en los dos bancos.
+
+Un dato más, relevante para el artículo principal: el control \emph{sin
+grafo} ---planificador sobre recuperación densa--- ya supera en HotpotQA
+a las dos referencias con grafo publicadas con los mismos modelos: $83{,}9$
+de cadena completa frente a $80{,}4$ de CatRAG y $75{,}5$ de \hippo{}. De la
+ventaja de la v4 sobre CatRAG ($+9{,}8$), el planificador explica por tanto
+$+3{,}5$ y la representación $+6{,}3$; en 2Wiki, de los $+28{,}4$ sobre
+CatRAG, el planificador explica $+15{,}7$ ($83{,}3 - 67{,}6$) y la
+representación $+12{,}7$.
+
+\begin{table}[t]
+\centering\footnotesize\setlength{\tabcolsep}{4pt}
+\caption{Banco de HotpotQA ($1\,000$ preguntas, corpus $9\,811$;
+\texttt{gpt-4o-mini} + \texttt{text-embedding-3-small}). Referencias
+publicadas de~\cite{catrag}; última columna: $\mathrm{FC@}5$ puente /
+comparación.}
+\label{tab:bancohotpot}
+\begin{tabular}{lcccccl}
+\toprule
+sistema & grafo & planif. & $\mathrm{R@}2$ & $\mathrm{R@}5$ & $\mathrm{FC@}5$ & $\mathrm{FC@}5$ por tipo\\
+\midrule
+BM25 (nuestro) & --- & --- & $56{,}1$ & $72{,}8$ & $49{,}5$ & $45{,}4$ / $67{,}2$\\
+\hippo{} (publicado) & sí & no & --- & $87{,}1$ & $75{,}5$ & ---\\
+CatRAG (publicado) & sí & no & --- & $89{,}5$ & $80{,}4$ & ---\\
+\ctrl{} con títulos (control) & \textbf{no} & \textbf{sí} & $82{,}0$ & $91{,}3$ & $83{,}9$ & $80{,}3$ / $99{,}5$\\
+\ctrl{} plus (control reforzado, post-hoc) & \textbf{no} & \textbf{sí} & $82{,}2$ & $92{,}0$ & $85{,}1$ & $81{,}8$ / $99{,}5$\\
+\sys{} v4 & sí & sí & $77{,}1$ & $94{,}7$ & $\mathbf{90{,}2}$ & $88{,}2$ / $98{,}9$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\subsection{Resumen frente a los criterios}
+\label{sec:criterios}
+
+La tabla~\ref{tab:resumen} reúne las cuatro diferencias pareadas
+v4 $-$ control. Las dos del banco superan los cinco puntos con
+significación; las dos del sondeo son menores pero significativas. El
+refuerzo post-hoc del control, medido también en los bancos ($333$ y $339$
+llamadas adicionales: las re-planificaciones), recupera $3{,}1$ puntos en
+2Wiki ($83{,}3 \to 86{,}4$) y $1{,}2$ en HotpotQA ($83{,}9 \to 85{,}1$) y
+deja la diferencia en $+9{,}6$ $[+7{,}6,+11{,}8]$ y $+5{,}1$
+$[+2{,}9,+7{,}3]$: por encima del umbral en los dos, con el oro perdido
+fuera del alcance en $105$ de $111$ y $58$ de $93$ casos. Según los criterios de la
+sección~\ref{sec:analisis}, la representación aporta una parte sustancial
+y medible de la cadena completa, mayor en 2Wiki que en HotpotQA y
+concentrada, en los dos conjuntos, en las cadenas con puente.
+
+\begin{table}[t]
+\centering\footnotesize
+\caption{Diferencia pareada v4 $-$ control (con títulos) en $\mathrm{FC@}5$;
+entre paréntesis, preguntas que solo acierta la v4 / solo el control; última
+columna, fracción del oro perdido por el control que está fuera de su
+top-20.}
+\label{tab:resumen}
+\begin{tabular}{lcccc}
+\toprule
+medición & v4 & control & $\Delta$ [IC $95\%$] & fuera del alcance\\
+\midrule
+2Wiki, sondeo ($200$) & $97{,}0$ & $89{,}0$ & $+8{,}0$ $[+4{,}5,+12{,}0]$ (17/1) & $17/18$\\
+HotpotQA, sondeo ($200$) & $97{,}5$ & $93{,}5$ & $+4{,}0$ $[+1{,}5,+7{,}0]$ (8/0) & $5/9$\\
+2Wiki, banco ($1\,000$) & $96{,}0$ & $83{,}3$ & $+12{,}7$ $[+10{,}5,+14{,}9]$ (135/8) & $130/141$\\
+HotpotQA, banco ($1\,000$) & $90{,}2$ & $83{,}9$ & $+6{,}3$ $[+4{,}1,+8{,}6]$ (99/36) & $63/103$\\
+\midrule
+2Wiki, banco, control \emph{plus} & $96{,}0$ & $86{,}4$ & $+9{,}6$ $[+7{,}6,+11{,}8]$ (107/11) & $105/111$\\
+HotpotQA, banco, control \emph{plus} & $90{,}2$ & $85{,}1$ & $+5{,}1$ $[+2{,}9,+7{,}3]$ (89/38) & $58/93$\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+% =========================================================================
+\section{Discusión}
+\label{sec:discusion}
+
+\paragraph{Respuesta a la pregunta.}
+Con el mismo modelo, las mismas consignas y demostraciones, el mismo número
+de llamadas y el mismo tiempo, quitar el grafo cuesta $12{,}7$ puntos de
+cadena completa en el banco de 2Wiki, $6{,}3$ en el de HotpotQA y entre
+$4$ y $8$ en los sondeos; reforzar el control con una re-planificación adicional
+recupera una fracción y deja la diferencia significativa. El planificador
+no es decorado ---sobre recuperación densa ya bate a \hippo{} por $17$
+puntos--- pero tampoco es la explicación: sin representación queda por
+debajo de la representación sin planificador. Las dos piezas se necesitan y
+se complementan: el planificador asigna recursos por cadena; el grafo
+convierte cada hecho aprobado en una entidad con pasaje propio y, con la
+frontera y el paseo, alcanza el puente que la pregunta no nombra.
+
+\paragraph{Dónde está exactamente la contribución de la representación.}
+La descomposición y la traza convergen en tres mecanismos, por orden de
+peso. (1) \emph{Granularidad}: una aserción reificada es una unidad
+seleccionable; el mismo dato dentro de un pasaje de prosa, truncado además
+por presupuesto, pasa desapercibido al mismo modelo (\gl{}Too Many
+Wives\gr{}: el nombre del director estaba en el carácter $49$). (2)
+\emph{Siembra por entidad y pasaje propio}: aprobar un hecho siembra a sus
+participantes, y cada participante canónico deposita masa en su propio
+artículo; el control necesita para lo mismo una segunda búsqueda que solo
+ocurre si el planificador escribe el nombre en un hueco con ancla. (3)
+\emph{Frontera y paseo}: los hechos incidentes en las entidades enlazadas
+entran como candidatos aunque el coseno no los traiga, y el paseo ordena
+por estructura y no solo por afinidad. La firma empírica de los tres es la
+misma: el oro que el control pierde no está mal ordenado, está fuera de su
+alcance ($130$ de $141$).
+
+\paragraph{Una mejora que el control regala.}
+En $\mathrm{R@}2$ y $\mathrm{FC@}2$ el control iguala o supera a la v4
+(sondeos: $+3{,}0$ y $+4{,}0$; banco de 2Wiki: $-1{,}0$, n.s.; banco de
+HotpotQA: $+5{,}0$ y $+8{,}2$, significativos) porque pone en cabeza los
+pasajes que el analista aprobó. La v4 los deja al orden del paseo, que
+reparte la masa entre vecinos. Un orden híbrido ---pasajes propios de las
+entidades aprobadas primero, después el paseo--- no cuesta llamadas y
+debería trasladar esa ventaja a la v4 sin tocar la cadena completa; es la
+evolución inmediata que sale de este control.
+
+\paragraph{Coste.}
+Por consulta, los dos sistemas cuestan lo mismo ($\approx 3$ llamadas a
+\texttt{gpt-4o-mini}, $\approx 0{,}001$ USD). La diferencia está en la
+indexación: el control solo incrusta los pasajes (unos céntimos por cada
+$10\,000$); el grafo exige la extracción ($\approx 0{,}4$ USD por cada
+$1\,000$ pasajes), la memoria canónica y el grafo. Es un coste único, por
+corpus, y la memoria canónica es además reutilizable como recurso de
+enlace; pero es un coste real que un artículo debe presentar junto a la
+ganancia.
+
+\paragraph{Lo que este control no dice.}
+No dice que no exista un sistema sin grafo mejor: un reordenador cruzado
+sobre el top-50 denso, una recuperación iterativa con más llamadas o un
+planificador con acceso al texto completo de los pasajes podrían
+acercarse. Dice que, a igualdad de planificador y de presupuesto, la
+representación explica una parte sustancial de la cadena completa
+---$12{,}7$ puntos en 2Wiki, $6{,}3$ en HotpotQA--- y que el planificador,
+solo, explica el resto de la ventaja sobre los sistemas publicados: en
+HotpotQA basta para superar a CatRAG y \hippo{}. La diferencia entre
+conjuntos es coherente con su naturaleza: las preguntas de 2Wiki nombran la
+entidad ancla con la forma del título y encadenan relaciones de una lista
+corta, terreno donde el pasaje propio y la siembra por entidad rinden más;
+las de HotpotQA describen y nombran con menos regularidad, y ahí una parte
+de la ventaja se traslada al orden temprano, donde el control gana.
+
+% =========================================================================
+\section{Validez}
+\label{sec:validez}
+
+\begin{enumerate}[leftmargin=1.6em, itemsep=1pt]
+\item El control es \emph{nuestro}: un tercero podría construir otro sin
+  grafo más fuerte (reordenador cruzado, recuperación iterativa con más
+  llamadas). Lo que se aísla es la representación a igualdad de
+  planificador, no el mejor sistema sin grafo posible.
+\item Las consignas se escribieron para hechos y se adaptaron a pasajes con
+  cambios mínimos; una consigna diseñada desde cero para pasajes podría
+  rendir algo más. La adaptación se documenta íntegra en el código.
+\item Los pasajes que ve el analista están truncados a $260$ caracteres por
+  paridad de presupuesto; los hechos de v4 son atómicos y cubren el pasaje
+  entero. Es una ventaja de representación, no de modelo, y por tanto forma
+  parte de lo que se quiere medir; pero conviene decirlo.
+\item Una sola ejecución por configuración; la varianza entre ejecuciones
+  del mismo sistema en 2Wiki fue de dos preguntas de mil.
+\item El refuerzo \ctrl{} plus se diseñó después de leer los fallos del
+  sondeo (no del banco) y se presenta como post-hoc; no cambia la
+  conclusión, pero un lector debe saber que el control principal es el
+  pre-registrado.
+\item La paridad de presupuesto se verificó a posteriori en el banco de
+  2Wiki: $3\,302$ llamadas nuevas en los dos sistemas, $63$ y $65$ minutos.
+\end{enumerate}
+
+\section*{Reproducibilidad}
+
+Código: \texttt{retrieval/wiki2\_plan\_denso.py} (control, con sus tres
+variantes), \texttt{eval/wiki2\_correr.py --sistema \{denso, denso\_puro,
+denso\_plus\}}, \texttt{eval/wiki2\_control.py} (descomposición pareada).
+Resultados por pregunta en \texttt{artifacts/wiki2/resultados\_denso*\_plan\_4omini\_*.jsonl},
+descomposiciones en \texttt{control\_*.json}, bitácora de la sesión en
+\texttt{BITACORA\_2026-08-30.md}.
+
+\end{document}

@@ -1,0 +1,85 @@
+{
+ "A": "denso_plan_4omini_hotpot_sondeo",
+ "B": "plan_v4_4omini_hotpot_sondeo",
+ "n": 200,
+ "metricas": {
+  "recall@2": {
+   "A": 0.91,
+   "B": 0.87,
+   "dif": 0.04,
+   "ic": [
+    0.0025,
+    0.0775
+   ],
+   "sig": "SIG",
+   "gana": 37,
+   "pierde": 21
+  },
+  "recall@5": {
+   "A": 0.965,
+   "B": 0.9875,
+   "dif": -0.0225,
+   "ic": [
+    -0.04,
+    -0.0075
+   ],
+   "sig": "SIG",
+   "gana": 0,
+   "pierde": 8
+  },
+  "full_chain@5": {
+   "A": 0.935,
+   "B": 0.975,
+   "dif": -0.04,
+   "ic": [
+    -0.07,
+    -0.015
+   ],
+   "sig": "SIG",
+   "gana": 0,
+   "pierde": 8
+  },
+  "full_chain@10": {
+   "A": 0.955,
+   "B": 0.98,
+   "dif": -0.025,
+   "ic": [
+    -0.050124999999999996,
+    0.0
+   ],
+   "sig": "ns",
+   "gana": 1,
+   "pierde": 6
+  },
+  "full_chain@20": {
+   "A": 0.965,
+   "B": 0.99,
+   "dif": -0.025,
+   "ic": [
+    -0.05,
+    -0.005
+   ],
+   "sig": "SIG",
+   "gana": 0,
+   "pierde": 5
+  }
+ },
+ "por_tipo": {
+  "bridge": {
+   "dif": -0.08,
+   "ic": [
+    -0.14,
+    -0.03
+   ],
+   "sig": "SIG"
+  },
+  "comparison": {
+   "dif": 0.0,
+   "ic": [
+    0.0,
+    0.0
+   ],
+   "sig": "ns"
+  }
+ }
+}

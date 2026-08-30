@@ -1,0 +1,111 @@
+{
+ "A": "plan_v4_4omini_hotpot_sondeo",
+ "B": "denso_plan_4omini_hotpot_sondeo",
+ "n": 200,
+ "metricas": {
+  "recall@2": {
+   "A": 0.87,
+   "B": 0.91,
+   "dif": -0.04,
+   "ic": [
+    -0.0775,
+    -0.0025
+   ],
+   "sig": "SIG"
+  },
+  "recall@5": {
+   "A": 0.9875,
+   "B": 0.965,
+   "dif": 0.0225,
+   "ic": [
+    0.0075,
+    0.04
+   ],
+   "sig": "SIG"
+  },
+  "full_chain@2": {
+   "A": 0.755,
+   "B": 0.835,
+   "dif": -0.08,
+   "ic": [
+    -0.15,
+    -0.01
+   ],
+   "sig": "SIG"
+  },
+  "full_chain@5": {
+   "A": 0.975,
+   "B": 0.935,
+   "dif": 0.04,
+   "ic": [
+    0.015,
+    0.07
+   ],
+   "sig": "SIG"
+  },
+  "full_chain@10": {
+   "A": 0.98,
+   "B": 0.955,
+   "dif": 0.025,
+   "ic": [
+    0.0,
+    0.055
+   ],
+   "sig": "ns"
+  },
+  "full_chain@20": {
+   "A": 0.99,
+   "B": 0.965,
+   "dif": 0.025,
+   "ic": [
+    0.005,
+    0.05
+   ],
+   "sig": "SIG"
+  }
+ },
+ "contingencia": {
+  "ambos": 187,
+  "solo_A": 8,
+  "solo_B": 0,
+  "ninguno": 5
+ },
+ "solo_A": {
+  "por_tipo": {
+   "bridge": 8
+  },
+  "posicion_oro_perdido": {
+   "6-10": 3,
+   "fuera": 5,
+   "11-20": 1
+  }
+ },
+ "solo_B": {
+  "por_tipo": {},
+  "posicion_oro_perdido": {}
+ },
+ "por_tipo": {
+  "bridge": {
+   "n": 100,
+   "A": 0.95,
+   "B": 0.87,
+   "dif": 0.08,
+   "ic": [
+    0.03,
+    0.14
+   ],
+   "sig": "SIG"
+  },
+  "comparison": {
+   "n": 100,
+   "A": 1.0,
+   "B": 1.0,
+   "dif": 0.0,
+   "ic": [
+    0.0,
+    0.0
+   ],
+   "sig": "ns"
+  }
+ }
+}

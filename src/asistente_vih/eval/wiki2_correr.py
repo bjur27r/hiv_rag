@@ -39,13 +39,23 @@ def main() -> None:
     ap.add_argument("--no-guardar", action="store_true")
     ap.add_argument("--pareado", nargs="*", default=None,
                     help="nombres de resultados contra los que comparar (wiki2_pareado)")
+    ap.add_argument("--sistema", choices=["v4", "denso", "denso_puro", "denso_plus"], default="v4",
+                    help="v4 = Plan A sobre el grafo; denso = CONTROL sin grafo con indice de "
+                         "titulos; denso_puro = control sin grafo ni titulos; denso_plus = control "
+                         "reforzado post-hoc (re-planifica sin pasajes nuevos, anclas a 700 car.)")
     args = ap.parse_args()
 
-    r = Wiki2PlanRAG(split=args.split, modelo=args.modelo, dicc=args.dicc,
-                     enlazador=args.enlazador, usar_conjunto=not args.sin_conjunto,
-                     usar_salto=not args.sin_salto,
-                     conjunto_en_comparacion=not args.conjunto_solo_no_comparacion,
-                     max_rondas=args.max_rondas)
+    if args.sistema == "v4":
+        r = Wiki2PlanRAG(split=args.split, modelo=args.modelo, dicc=args.dicc,
+                         enlazador=args.enlazador, usar_conjunto=not args.sin_conjunto,
+                         usar_salto=not args.sin_salto,
+                         conjunto_en_comparacion=not args.conjunto_solo_no_comparacion,
+                         max_rondas=args.max_rondas)
+    else:
+        from ..retrieval.wiki2_plan_denso import PlanDenso
+        r = PlanDenso(split=args.split, modelo=args.modelo, titulos=(args.sistema != "denso_puro"),
+                      usar_conjunto=not args.sin_conjunto, usar_salto=not args.sin_salto,
+                      max_rondas=args.max_rondas, replan_sin_extra=(args.sistema == "denso_plus"))
     preguntas, _ = cargar_split(args.split)
     if args.limit:
         preguntas = preguntas[:args.limit]
@@ -54,8 +64,12 @@ def main() -> None:
             + ("_sinconjunto" if args.sin_conjunto else "") + ("_sinsalto" if args.sin_salto else "") \
             + ("_conjcomp" if args.conjunto_solo_no_comparacion else "") \
             + (f"_r{args.max_rondas}" if args.max_rondas != 3 else "")
-        args.nombre = f"plan_v4{abl}_{_etiqueta_modelo(args.modelo)}_{args.split}"
-    print(f"config: split={args.split} modelo={args.modelo} dicc={args.dicc!r} enlazador={args.enlazador} "
+        base = {"v4": "plan_v4", "denso": "denso_plan", "denso_puro": "densopuro_plan",
+                "denso_plus": "densoplus_plan"}[args.sistema]
+        if args.sistema != "v4":
+            abl = abl.replace("_dicc3", "").replace("_enl3", "")
+        args.nombre = f"{base}{abl}_{_etiqueta_modelo(args.modelo)}_{args.split}"
+    print(f"config: sistema={args.sistema} split={args.split} modelo={args.modelo} dicc={args.dicc!r} enlazador={args.enlazador} "
           f"conjunto={not args.sin_conjunto} (en comparacion: {not args.conjunto_solo_no_comparacion}) "
           f"salto={not args.sin_salto} rondas<={args.max_rondas} n={len(preguntas)} -> {args.nombre}")
     t0 = time.time()

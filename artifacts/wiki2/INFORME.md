@@ -782,8 +782,10 @@ congelada, gpt-4o-mini**: índice 87.629 aserciones / 48.856 entradas / grafo
 81,3/64,9, HippoRAG 2 87,1/75,5, CatRAG 89,5/80,4; HippoRAG 2 con NV-Embed-v2
 7B: R@5 96,3. → **+5,2 R@5 / +9,8 FC@5 sobre CatRAG** con cero ajuste al
 conjunto: H1 confirmada. Pareado vs BM25 +40,7 FC@5 SIG. Ficheros
-`plan_v4_4omini_hotpot_benchmark`. Pendiente: deepseek nocturno; HippoRAG 2
-reproducido sobre HotpotQA (≈$5) para el pareado, a decidir. Banco 2Wiki con gpt-4o-mini
+`plan_v4_4omini_hotpot_benchmark`. Con deepseek-chat (30-08 noche): **R@2 80,8 / R@5 96,0 / FC@5 93,0 / FC@10
+94,7** (bridge 91,4 / comparison 100); vs v4 gpt-4o-mini +2,8 [+1,4,+4,2] SIG; vs
+BM25 +43,5; vs CatRAG publicado +6,5/+12,6. Pendiente: HippoRAG 2 reproducido
+sobre HotpotQA (≈$5) para el pareado, a decidir. Banco 2Wiki con gpt-4o-mini
 (paridad estricta) medido 11:36–12:41.
 
 **BANCO 2Wiki — Plan A v4, gpt-4o-mini (cifra de archivo en paridad estricta)**:
@@ -795,7 +797,7 @@ reproducido sobre HotpotQA (≈$5) para el pareado, a decidir. Banco 2Wiki con g
 | v3 (diccionario, 22-08) | 73,0 | 96,0 | 90,6 | 93,4 | 99,2 / 91,0 / 84,3 / 83,8 |
 | Plan A 25-08, deepseek-chat | 82,2 | 98,6 | 97,1 | 97,2 | 99,6 / 96,1 / 90,7 / 99,1 |
 | **Plan A v4, gpt-4o-mini** | **80,2** | **98,1** | **96,0** | **96,7** | 99,6 / 95,9 / 84,3 / 97,9 |
-| **Plan A v4, deepseek-chat** (30-08 noche) | **84,2** | **98,9** | **97,7** | 97,8 | (ver agregados) |
+| **Plan A v4, deepseek-chat** (30-08 noche) | **84,2** | **98,9** | **97,7** | 97,8 | 100 / 97,1 / 92,6 / 98,7 |
 
 Pareados (1.000, bootstrap): v4 − v3 FC@5 +5,4 [+3,7, +7,1] SIG (gana 67 /
 pierde 13; bridge_comparison +14,0, compositional +4,8 SIG; comparison,

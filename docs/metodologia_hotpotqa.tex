@@ -51,8 +51,9 @@ CatRAG ($1\,000$ preguntas de nivel \emph{hard}, corpus de $9\,811$ pasajes) y
 con los mismos modelos que esos trabajos (\texttt{gpt-4o-mini},
 \texttt{text-embedding-3-small}), la medición única del banco da
 $\mathrm{R@}5$ $94{,}7$ y cadena completa a $k{=}5$ ($\mathrm{FC@}5$)
-$90{,}2$, frente a $89{,}5$ / $80{,}4$ de CatRAG y $87{,}1$ / $75{,}5$ de
-\hippo{} publicados con idéntico equipamiento; pareado frente a BM25 sobre el
+$90{,}2$ ---y $96{,}0$ / $93{,}0$ con el modelo adoptado,
+\texttt{deepseek-chat}---, frente a $89{,}5$ / $80{,}4$ de CatRAG y $87{,}1$
+/ $75{,}5$ de \hippo{} publicados con idéntico equipamiento; pareado frente a BM25 sobre el
 mismo corpus, $+40{,}7$ puntos de $\mathrm{FC@}5$ (IC del $95\%$
 $[+37{,}1,+44{,}1]$). En el sondeo retenido, las ablaciones atribuyen la
 ganancia a las mismas piezas que en 2Wiki: el salto dirigido ($+2{,}0$ de
@@ -493,6 +494,21 @@ hipótesis H1 se confirma con margen: pedía superar $80{,}4$ y la v4 lo
 supera en diez puntos. El coste de la medición fue de $2\,982$ llamadas
 ($\approx 3$ por pregunta, $\approx 1$ USD, $62$ minutos).
 
+\paragraph{Con el modelo adoptado.}
+La misma configuración con \texttt{deepseek-chat} en las tres llamadas
+---el modelo adoptado en 2Wiki, medido en franja nocturna--- da
+$\mathrm{R@}2$ $80{,}8$, $\mathrm{R@}5$ $96{,}0$ $[95{,}0,97{,}0]$,
+$\mathrm{FC@}5$ $93{,}0$ $[91{,}3,94{,}5]$ y $\mathrm{FC@}10$ $94{,}7$
+(puente $95{,}1$ / $91{,}4$; comparación $100$ / $100$). Pareada frente a la
+fila de paridad, $+2{,}8$ de $\mathrm{FC@}5$ $[+1{,}4,+4{,}2]$ (gana $41$,
+pierde $13$), toda en puente ($+3{,}2$); frente a BM25, $+43{,}5$
+$[+40{,}1,+46{,}7]$. Frente a CatRAG publicado, $+6{,}5$ de $\mathrm{R@}5$ y
+$+12{,}6$ de cadena completa, con la salvedad de que aquí el modelo del
+analista no es el suyo. El orden de las dos filas es el mismo que en 2Wiki
+($97{,}7$ frente a $96{,}0$): el modelo adoptado añade entre dos y tres
+puntos sobre \texttt{gpt-4o-mini}, y la ganancia del diseño es la que
+sostiene el resto.
+
 \begin{table}[t]
 \centering\footnotesize\setlength{\tabcolsep}{5pt}
 \caption{Banco de HotpotQA ($1\,000$ preguntas, corpus $9\,811$). Referencias
@@ -515,6 +531,7 @@ CatRAG~\cite{catrag} & --- & $89{,}5$ & $80{,}4$ & F1 $71{,}4$\\
 \midrule
 BM25 (nuestra implementación, mismo corpus) & $56{,}1$ & $72{,}8$ & $49{,}5$ & suelo del pareado\\
 \textbf{\sys{} v4 (este trabajo)} & $\mathbf{77{,}1}$ & $\mathbf{94{,}7}$ & $\mathbf{90{,}2}$ & $\mathrm{FC@}10$ $93{,}6$; puente $88{,}2$, comparación $98{,}9$\\
+\textbf{\sys{} v4, \texttt{deepseek-chat}} & $\mathbf{80{,}8}$ & $\mathbf{96{,}0}$ & $\mathbf{93{,}0}$ & $\mathrm{FC@}10$ $94{,}7$; puente $91{,}4$, comparación $100$; modelo adoptado\\
 \midrule
 \hippo{} con NV-Embed-v2 (7B) & --- & $96{,}3$ & --- & techo de hardware\\
 \bottomrule

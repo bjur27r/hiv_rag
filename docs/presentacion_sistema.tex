@@ -1,0 +1,633 @@
+% =========================================================================
+% Presentación científica del sistema de recuperación multisalto
+% (grafo de aserciones reificadas + memoria canónica + planificador)
+% y su aplicación al asistente clínico sobre las guías de GeSIDA.
+%
+% Compilar:  tectonic presentacion_sistema.tex
+% =========================================================================
+\documentclass[aspectratio=169,10pt]{beamer}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[spanish,es-noshorthands]{babel}
+\usepackage{lmodern}
+\usepackage{amsmath,amssymb}
+\usepackage{booktabs}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,calc,shapes.geometric}
+\usepackage{pgfplots}
+\pgfplotsset{compat=1.17}
+
+% ---------- estilo sobrio
+\usetheme{default}
+\usecolortheme{seagull}
+\definecolor{azul}{RGB}{31,80,154}
+\definecolor{teja}{RGB}{186,84,32}
+\definecolor{verde}{RGB}{34,120,74}
+\definecolor{grisf}{RGB}{100,100,100}
+\setbeamercolor{frametitle}{fg=azul}
+\setbeamercolor{title}{fg=azul}
+\setbeamercolor{structure}{fg=azul}
+\setbeamertemplate{navigation symbols}{}
+\setbeamertemplate{footline}[frame number]
+\setbeamertemplate{itemize items}[circle]
+\newcommand{\sys}{\textsc{CatRAG-Reif}}
+\newcommand{\hippo}{HippoRAG~2}
+\newcommand{\bien}[1]{\textcolor{verde}{\textbf{#1}}}
+\newcommand{\mal}[1]{\textcolor{teja}{\textbf{#1}}}
+
+\tikzset{
+  caja/.style={draw=azul, rounded corners=2pt, align=center, inner sep=4pt, fill=azul!8, font=\scriptsize},
+  dato/.style={draw=grisf, dashed, rounded corners=2pt, align=center, inner sep=3pt, font=\scriptsize},
+  ent/.style={draw=azul, ellipse, align=center, inner sep=2pt, font=\scriptsize},
+  aser/.style={draw=azul, rectangle, rounded corners=1pt, align=center, inner sep=3pt, fill=azul!12, font=\scriptsize},
+  chk/.style={draw=grisf, rectangle, align=center, inner sep=3pt, font=\scriptsize},
+  fl/.style={-{Stealth[length=2mm]}, semithick, azul},
+  flmal/.style={-{Stealth[length=2mm]}, semithick, teja},
+  flok/.style={-{Stealth[length=2mm]}, semithick, verde},
+  et/.style={font=\tiny, text=grisf, align=center},
+}
+
+\title{Recuperación multisalto sobre un grafo de aserciones reificadas\\
+con memoria canónica de entidades y planificación de la evidencia}
+\subtitle{Evaluación en benchmarks públicos y aplicación al asistente clínico
+sobre las guías de GeSIDA}
+\author{}
+\date{Septiembre de 2026}
+
+\begin{document}
+
+\begin{frame}
+\titlepage
+\end{frame}
+
+\begin{frame}{Guion}
+\tableofcontents
+\end{frame}
+
+% =========================================================================
+\section{Introducción}
+
+\begin{frame}{El problema: la pregunta no se parece a la evidencia que falta}
+\centering
+\begin{tikzpicture}[node distance=4mm and 10mm]
+  \node[dato, fill=azul!5, text width=44mm] (q) {\textbf{Pregunta}\\
+    \emph{«Where did Sonia Greene's husband die?»}};
+  \node[chk, right=18mm of q, text width=40mm] (p1) {\textbf{Pasaje 1} · \emph{Sonia Greene}\\
+    «\dots{}her two-year marriage to \textbf{H.\,P. Lovecraft}\dots»};
+  \node[chk, below=7mm of p1, text width=40mm] (p2) {\textbf{Pasaje 2 (puente)} · \emph{H. P. Lovecraft}\\
+    «Howard Phillips Lovecraft\dots{} \textbf{died} in \textbf{Providence}\dots»};
+  \draw[flok] (q) -- node[et, above]{$\cos=0{,}534$ · rango 1} (p1);
+  \draw[flmal] (q.south east) to[out=-15,in=180]
+      node[et, below, sloped]{$\cos=\mathbf{0{,}089}$ · rango \textbf{4\,358} de 6\,119} (p2);
+  \node[et, below=1mm of p2, text width=52mm, align=center]
+      {la respuesta está aquí, pero el vector de la pregunta\\ no contiene «Lovecraft»};
+\end{tikzpicture}
+
+\vspace{2mm}
+\begin{itemize}
+\item La recuperación densa/léxica encuentra lo \emph{nombrado}, no lo \emph{encadenado}:
+  la información que identifica al pasaje puente solo aparece \emph{tras leer} el primero.
+\item Consecuencia medible: exhaustividad parcial alta con \mal{cadena rota}
+  (BM25 en cadenas dobles: $\mathrm{R@}5=50{,}9$ pero $\mathrm{FC@}5=0{,}9$).
+\end{itemize}
+\end{frame}
+
+\begin{frame}{La métrica alineada con la tarea: cadena completa (FC@$k$)}
+\begin{columns}[T]
+\column{0.52\textwidth}
+\begin{block}{Definiciones (pregunta $q$, oro $G_q$, top-$k$ $T_k$)}
+\[
+\mathrm{R@}k=\frac{|G_q\cap T_k|}{|G_q|}
+\qquad
+\mathrm{FC@}k=\mathbf{1}\!\left[G_q\subseteq T_k\right]
+\]
+\end{block}
+\begin{itemize}
+\item Un lector no puede componer la respuesta si le falta \emph{un} eslabón:
+  $\mathrm{R@}5=0{,}75$ en una cadena de 4 vale lo mismo que 0.
+\item FC@$k$ (\emph{Full Chain Retrieval}) es la métrica de integridad del
+  razonamiento propuesta por CatRAG (Lau et al., ACL~2026).
+\end{itemize}
+\column{0.44\textwidth}
+\centering
+\begin{tikzpicture}[node distance=2.5mm]
+  \node[chk, fill=verde!15] (a) {film A};
+  \node[chk, fill=verde!15, right=of a] (b) {director A};
+  \node[chk, fill=verde!15, below=of a] (c) {film B};
+  \node[chk, fill=teja!20, right=of c] (d) {¿director B?};
+  \draw[flok] (a) -- (b);
+  \draw[flmal] (c) -- (d);
+  \node[et, below=1mm of c, xshift=10mm, text width=40mm, align=center]
+    {3 de 4 pasajes $\Rightarrow$ R@5 alta,\\ FC@5 $=0$: \mal{no hay respuesta fundamentada}};
+\end{tikzpicture}
+\end{columns}
+\vspace{2mm}
+\textbf{Estado del arte}: \hippo{} (PPR sobre grafo de tripletes; Gutiérrez et al.\ 2025)
+y CatRAG (recorrido adaptativo a la consulta). Sus dos límites estructurales:
+\emph{identidad de entidades sin resolver} y \emph{recursos fijos por consulta}.
+\end{frame}
+
+% =========================================================================
+\section{Metodología}
+
+\begin{frame}{Arquitectura: pagar una vez en indexación, decidir bien en consulta}
+\centering
+\begin{tikzpicture}[node distance=3mm and 4mm]
+  % indexacion
+  \node[dato] (corpus) {Corpus\\ $6\,119$ pasajes};
+  \node[caja, right=of corpus] (openie) {Extracción\\ \textbf{reificada} (LLM)};
+  \node[caja, right=of openie] (dicc) {\textbf{Memoria canónica}\\ de entidades};
+  \node[caja, right=of dicc] (grafo) {Grafo canónico\\ $81$k nodos};
+  \node[dato, right=of grafo] (emb) {vectores: hechos,\\ fichas, pasajes};
+  \draw[fl] (corpus) -- (openie); \draw[fl] (openie) -- (dicc);
+  \draw[fl] (dicc) -- (grafo); \draw[fl] (grafo) -- (emb);
+  % consulta
+  \node[dato, below=10mm of corpus] (q) {Pregunta};
+  \node[caja, right=of q, fill=teja!12, draw=teja] (plan) {\textbf{Analista} (LLM)\\ menciones + \textbf{plan} + selección};
+  \node[caja, right=of plan] (siembra) {Siembra\\ compuerta dura};
+  \node[caja, right=of siembra] (ppr) {PPR\\ modulado};
+  \node[caja, right=of ppr, fill=teja!12, draw=teja] (salto) {\textbf{Salto dirigido}\\ si quedan huecos};
+  \node[caja, right=of salto, fill=teja!12, draw=teja] (conj) {\textbf{Conjunto}\\ 5 que cubren el plan};
+  \draw[fl] (q) -- (plan); \draw[fl] (plan) -- (siembra);
+  \draw[fl] (siembra) -- (ppr); \draw[fl] (ppr) -- (salto); \draw[fl] (salto) -- (conj);
+  \draw[fl, grisf] (grafo.south) to[out=-90,in=90] (ppr.north);
+  \begin{scope}[on background layer]
+    \node[fit=(corpus)(emb), draw=grisf, rounded corners=3pt, inner sep=3pt,
+      label={[et]above left:{\textbf{indexación} · una vez por corpus · sin ver ninguna pregunta}}] {};
+    \node[fit=(q)(conj), draw=grisf, rounded corners=3pt, inner sep=3pt,
+      label={[et]above left:{\textbf{consulta} · $\sim$2 llamadas LLM · $\sim$0{,}001\,\$}}] {};
+  \end{scope}
+\end{tikzpicture}
+
+\vspace{2mm}
+\begin{itemize}
+\item Modelos pequeños en todo: \texttt{gpt-4o-mini} / \texttt{deepseek-chat}
+  + \texttt{text-embedding-3-small} (1536 d).
+\item En \textcolor{teja}{naranja}, las tres decisiones LLM de la consulta
+  (el \emph{planificador}); el resto es álgebra y estructura.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Pieza 1 · La unidad semántica: aserción reificada, no triplete}
+\centering
+\begin{tikzpicture}[node distance=4mm and 8mm]
+  % izquierda: triple
+  \node[ent] (t1) {Atomised};
+  \node[ent, right=12mm of t1] (t2) {Oskar Roehler};
+  \draw[fl] (t1) -- node[et, above]{\emph{directed}} (t2);
+  \node[ent, below=5mm of t1, densely dotted] (t3) {Atomised (film)};
+  \draw[grisf, densely dotted] (t1) -- node[et, left]{¿sinonimia?} (t3);
+  \node[et, below=1mm of t3, xshift=8mm, text width=42mm, align=center]
+    {\textbf{(a) \hippo{}}: el hecho es una \emph{arista}\\ binaria, anónima, sin procedencia};
+  % derecha: asercion
+  \node[aser, right=30mm of t2, text width=34mm] (a) {\textbf{aserción} $a$\\[-1pt]
+    $\tau_a$: «Atomised was directed\\ by Oskar Roehler.»\\[1pt]
+    {\tiny calificadores: fecha, lugar}};
+  \node[ent, above left=4mm and -2mm of a] (e1) {can:atomised};
+  \node[ent, above right=4mm and -2mm of a] (e2) {can:oskar roehler};
+  \node[chk, below=5mm of a] (c1) {pasaje «Atomised (film)»};
+  \draw[fl] (a) -- node[et, left]{\textsc{sujeto}} (e1);
+  \draw[fl] (a) -- node[et, right]{\textsc{objeto}} (e2);
+  \draw[fl] (a) -- node[et, right]{\textsc{procedencia}} (c1);
+  \node[et, below=1mm of c1, text width=48mm, align=center]
+    {\textbf{(b) \sys{}}: el hecho es un \emph{nodo} con frase propia,\\
+     roles $n$-arios y vector $e(\tau_a)$};
+\end{tikzpicture}
+
+\vspace{1mm}
+\begin{itemize}
+\item Se incrusta \textbf{la frase}, no la etiqueta: robusto a etiquetas ruidosas;
+  las fechas viajan \emph{dentro} del hecho.
+\item El paseo aleatorio \textbf{razona a través del hecho}
+  (entidad $\to$ aserción $\to$ otra entidad / pasaje) y su tránsito se modula
+  por la consulta: $\mu_a=\tfrac14+\tfrac34\,\tilde\sigma_a$.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Pieza 2 · Memoria canónica de entidades: matar las «islas» en el índice}
+\begin{columns}[T]
+\column{0.5\textwidth}
+\centering
+\begin{tikzpicture}[node distance=4mm]
+  \node[ent, draw=teja] (m1) {«H.\,P. Lovecraft»\\ \tiny(en \emph{Sonia Greene})};
+  \node[ent, draw=teja, below=of m1] (m2) {«Howard Phillips Lovecraft»\\ \tiny(en su biografía)};
+  \draw[flmal, dashed] (m1) -- node[et, right]{$\cos = 0{,}781 < 0{,}80$\\ \mal{sin arista}} (m2);
+  \node[et, below=1mm of m2, text width=50mm, align=center]
+   {sinonimia por umbral (\hippo{}: $172$k aristas):\\ falla justo donde más se necesita\\
+    \mal{57\,\% de los fallos de cadena eran islas}};
+\end{tikzpicture}
+\column{0.5\textwidth}
+\centering
+\begin{tikzpicture}[node distance=3mm]
+  \node[aser, text width=52mm] (f) {\textbf{entrada canónica} \texttt{can:h.\,p.\,lovecraft}\\[-1pt]
+   alias: \{H.\,P. Lovecraft; Howard Phillips Lovecraft\}\\[-1pt]
+   descripción: «American writer of weird fiction\dots»\\[-1pt]
+   \textbf{pasaje propio}: \emph{H. P. Lovecraft}};
+  \node[et, below=1mm of f, text width=56mm, align=center]
+   {fichas por mención (nombre $+$ contexto) $\to$ candidatos por 2 canales
+    $\to$ restricciones duras (fechas, ordinales) $\to$ \textbf{adjudicación LLM}
+    $\to$ fusión; el \textbf{título} del artículo es alias del sujeto};
+\end{tikzpicture}
+\end{columns}
+\vspace{2mm}
+\begin{itemize}
+\item Construida \textbf{una vez, solo del corpus} (jamás del oro); auditable; con QIDs de
+  Wikidata como verificación externa opcional (v4).
+\item Resultado: variantes de nombre colapsan en \textbf{un} nodo $\Rightarrow$ el grafo
+  canónico no necesita aristas de sinonimia; $178/188$ islas resueltas en el sondeo.
+\item Es el análogo, derivado del corpus, del \emph{linker} SNOMED del caso clínico.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Pieza 3 · El analista: planificar la cadena antes de seleccionar}
+\footnotesize
+\emph{«Which film has the director died first, Bílá Spona or A Night at Earl Carroll's?»}
+\centering
+\begin{tikzpicture}[node distance=2.5mm and 8mm]
+  \node[dato, text width=51mm, align=left] (cand) {\textbf{hechos candidatos} (top-40 coseno $\cup$ frontera)\\
+    2: A Night at Earl Carroll's \dots{} \textbf{directed by Kurt Neumann}\\
+    6: Bílá spona was \dots{} \textbf{directed by Martin Fri\v{c}}\\
+    8: \emph{Earl Carroll} (el actor) \emph{died on June 17, 1948}\, \dots};
+  \node[caja, right=of cand, fill=teja!12, draw=teja, text width=52mm, align=left] (plan) {\textbf{plan} (huecos):\\
+    director de Bílá spona $\to$ Martin Fri\v{c}\\
+    fecha de muerte de Martin Fri\v{c}\\
+    director de A Night\dots{} $\to$ Kurt Neumann\\
+    fecha de muerte de Kurt Neumann};
+  \draw[fl] (cand) -- (plan);
+\end{tikzpicture}
+
+\vspace{1.5mm}
+\begin{columns}[T]
+\column{0.55\textwidth}
+\textbf{Sin plan} (selector directo, tope 4):\\
+\mal{eligió al actor Earl Carroll como «director»}\\ y omitió a Kurt Neumann
+\emph{que estaba en la lista} $\Rightarrow$ cadena rota.
+\column{0.45\textwidth}
+\textbf{Con plan} (tope $=$ n.º de huecos):\\
+\bien{selecciona los dos hechos puente}; regla dura:
+prohibido rellenar huecos con conocimiento propio del modelo ($[X]$).
+\end{columns}
+\vspace{1.5mm}
+La misma llamada hace de \textbf{enlazador} (menciones $\to$ forma canónica $\to$ diccionario)
+y declara los \textbf{huecos sin cubrir}, que alimentan el salto dirigido
+\emph{y}, en clínica, la abstención fundamentada.
+\end{frame}
+
+\begin{frame}{Pieza 4 · Salto dirigido estructural: cuando el artículo habla en otro idioma}
+\centering
+\begin{tikzpicture}[node distance=3mm and 9mm]
+  \node[dato, text width=40mm] (hueco) {\textbf{hueco del plan}\\ «director of \emph{The Magician} (1958 film)» $\to$ $[X]$};
+  \node[caja, right=of hueco, text width=38mm] (dicc) {diccionario:\\ \texttt{can:the magician}\\ pasaje propio $=$\\ \emph{The Magician (1958 film)}};
+  \node[dato, right=of dicc, text width=44mm] (hechos) {aserciones \textbf{de ese pasaje}:\\
+    «\textbf{Ingmar Bergman} directed \textbf{Ansiktet}.»\\ \tiny(título original sueco)};
+  \draw[fl] (hueco) -- node[et, above]{estructura,\\ no coseno} (dicc);
+  \draw[fl] (dicc) -- (hechos);
+  \node[et, below=2mm of dicc, text width=100mm, align=center]
+   {el coseno del hueco con «Ingmar Bergman directed Ansiktet» es \mal{bajo} (cero vocabulario común);\\
+    la ruta \bien{estructural} (entidad enlazada $\to$ su pasaje propio $\to$ sus hechos, con procedencia visible)\\
+    lo rescata: el mini-filtro aprueba, Bergman se siembra, su biografía entra en el top-2};
+\end{tikzpicture}
+\vspace{2mm}
+\begin{itemize}
+\item Solo se ejecuta si el plan dejó huecos ($\sim$15--25\,\% de las consultas); una ronda.
+\item Es la capacidad nueva de verdad: resolver puentes \textbf{inmunes al alias}
+  (idiomas, títulos originales), imposibles para similitud y sinonimia.
+\end{itemize}
+\end{frame}
+
+\begin{frame}{Piezas 5--6 · Siembra con compuerta dura y PPR modulado; conjunto final}
+\begin{columns}[T]
+\column{0.55\textwidth}
+\textbf{Vector de reinicio} $\mathbf v$ (4 fuentes):
+\begin{enumerate}\footnotesize
+\item \textbf{compuerta dura}: solo siembran las entidades de hechos
+  \emph{aprobados} (peso 1); si nada aprueba $\to$ degradación suave al denso;
+\item presa densa sobre \emph{todos} los pasajes ($\times\,0{,}05$);
+\item anclas débiles ($\epsilon=0{,}05$);
+\item \textbf{pasaje propio}: $\mathbf v(\pi(\varepsilon)) \mathrel{+}= 0{,}5\,\mathbf v(\varepsilon)$
+  --- «el artículo de una entidad \emph{es} la entidad».
+\end{enumerate}
+\[
+\mathbf p^{(t+1)}=\lambda\!\left(P^{\top}\mathbf p^{(t)}+m_{\text{colg}}\mathbf v\right)+(1-\lambda)\,\mathbf v,
+\quad \lambda=0{,}5
+\]
+con $P$ renormalizada tras modular las entradas a cada hecho por su afinidad
+($\mu_a\in[\tfrac14,1]$; los aprobados a peso completo).
+\column{0.45\textwidth}
+\textbf{Conjunto final} (salvo comparaciones simples):\\[1mm]
+\begin{tikzpicture}[node distance=2mm]
+  \node[dato, text width=40mm] (top) {top-12 del PPR\\ \tiny(título + resumen)};
+  \node[caja, below=of top, fill=teja!12, draw=teja, text width=40mm] (set)
+    {LLM elige \textbf{el conjunto de 5}\\ que cubre \emph{todos} los huecos\\ \tiny(guarda: el top-2 del PPR se conserva)};
+  \draw[fl] (top) -- (set);
+\end{tikzpicture}\\[1mm]
+\footnotesize FC@$k$ es una propiedad \emph{del conjunto}, no de cada pasaje:
+esta decisión no la puede expresar un ranking punto a punto.
+Aporta $+6$ puntos de FC@2 (orden temprano).
+\end{columns}
+\end{frame}
+
+\begin{frame}{Protocolo experimental: paridad estricta y separación de datos}
+\begin{columns}[T]
+\column{0.52\textwidth}
+\begin{itemize}\small
+\item \textbf{Datasets} (subconjuntos de reproducción de \hippo{}/CatRAG):
+  2WikiMultihopQA ($1\,000$ preguntas $\times$ $6\,119$ pasajes) y HotpotQA
+  ($1\,000 \times 9\,811$); recuperación \emph{abierta} contra el corpus completo.
+\item \textbf{Paridad}: \hippo{} ejecutado con \emph{su propio código} y los
+  \emph{mismos modelos}; CatRAG publica con este mismo backbone
+  (\texttt{gpt-4o-mini}+\texttt{te3-small}) $\Rightarrow$ comparación directa legítima.
+\item \textbf{Validación cruzada de la reproducción}: nuestro \hippo{} en 2Wiki
+  ($85{,}9/65{,}8$) coincide \bien{al decimal} con la reproducción independiente
+  del artículo de CatRAG ($85{,}9/66{,}1$).
+\item \textbf{Estadística}: pareado por pregunta, bootstrap $B{=}2\,000$, IC 95\,\%.
+\end{itemize}
+\column{0.46\textwidth}
+\centering
+\begin{tikzpicture}[node distance=3mm]
+  \node[caja, fill=verde!12, draw=verde, text width=48mm] (cal)
+    {\textbf{calibración} ($11\,376$ preguntas)\\ \tiny enrutador, ejemplos de consignas};
+  \node[caja, fill=azul!10, below=of cal, text width=48mm] (son)
+    {\textbf{sondeo} ($200$, retenido)\\ \tiny TODO el diseño y las ablaciones se deciden aquí};
+  \node[caja, fill=teja!12, draw=teja, below=of son, text width=48mm] (banco)
+    {\textbf{banco de pruebas} ($1\,000$)\\ \tiny intocable: una medición por configuración};
+  \draw[fl] (cal) -- (son); \draw[fl] (son) -- (banco);
+\end{tikzpicture}\\[1mm]
+\footnotesize Configuración \textbf{congelada} antes de medir; en HotpotQA,
+\emph{cero ajuste} al conjunto.
+\end{columns}
+\end{frame}
+
+% =========================================================================
+\section{Resultados}
+
+\begin{frame}{2WikiMultihopQA: resultado principal (todos con el mismo backbone)}
+\centering
+\small
+\begin{tabular}{lcccc}
+\toprule
+ & R@2 & R@5 & FC@5 & FC@10\\
+\midrule
+BM25 & --- & $65{,}8$ & $32{,}8$ & $40{,}1$\\
+\hippo{} (su código) & $70{,}7$ & $85{,}9$ & $65{,}8$ & $71{,}7$\\
+CatRAG (publicado; código no liberado) & --- & $87{,}0$ & $67{,}6$ & ---\\
+\sys{} v3 (diccionario) & $73{,}0$ & $96{,}0$ & $90{,}6$ & $93{,}4$\\
+\textbf{\sys{} v4 $+$ planificador} (\texttt{gpt-4o-mini}) & $80{,}2$ & $98{,}1$ & $96{,}0$ & $96{,}7$\\
+\textbf{\sys{} v4 $+$ planificador} (\texttt{deepseek-chat}) & $\mathbf{84{,}2}$ & $\mathbf{98{,}9}$ & $\mathbf{97{,}7}$ & $\mathbf{97{,}8}$\\
+\bottomrule
+\end{tabular}
+
+\vspace{2mm}
+\begin{tikzpicture}
+\begin{axis}[ybar, width=0.86\textwidth, height=38mm, bar width=7mm,
+  symbolic x coords={BM25, HippoRAG 2, CatRAG (pub.), v3, v4 (4o-mini), v4 (deepseek)},
+  xtick=data, ymin=0, ymax=105, ylabel={\scriptsize FC@5}, nodes near coords,
+  every node near coord/.append style={font=\tiny},
+  tick label style={font=\tiny}, label style={font=\tiny}]
+\addplot[fill=azul!35, draw=azul] coordinates {(BM25,32.8) (HippoRAG 2,65.8) (CatRAG (pub.),67.6) (v3,90.6) (v4 (4o-mini),96.0) (v4 (deepseek),97.7)};
+\end{axis}
+\end{tikzpicture}
+
+\scriptsize Pareado v4$-$\hippo{}: $\Delta\mathrm{FC@}5=+31{,}9$ $[+28{,}9,+34{,}9]$
+(gana 326 / pierde 7); todos los tipos significativos. El artículo de \hippo{}
+con NV-Embed-v2 (7\,B, GPU) reporta $\mathrm{R@}5=90{,}4$: aquí $98{,}9$ con
+modelos de una fracción de ese coste.
+\end{frame}
+
+\begin{frame}{El hallazgo central: acumulación frente a colapso con la profundidad}
+\begin{columns}[T]
+\column{0.55\textwidth}
+\centering
+\begin{tikzpicture}
+\begin{axis}[ybar, width=\textwidth, height=44mm, bar width=5.5mm,
+  symbolic x coords={A sin puente, B puente simple, C doble puente},
+  xtick=data, ymin=0, ymax=112, ylabel={\scriptsize FC@5},
+  legend style={font=\tiny, at={(0.5,1.02)}, anchor=south, legend columns=2},
+  nodes near coords, every node near coord/.append style={font=\tiny},
+  tick label style={font=\tiny}, label style={font=\tiny}]
+\addplot[fill=grisf!40, draw=grisf] coordinates {(A sin puente,93.4) (B puente simple,77.0) (C doble puente,12.3)};
+\addplot[fill=verde!45, draw=verde] coordinates {(A sin puente,99.2) (B puente simple,89.6) (C doble puente,83.8)};
+\legend{\hippo{}, \sys{} v3}
+\end{axis}
+\end{tikzpicture}
+\column{0.45\textwidth}
+\textbf{Modelo nulo}: eslabones independientes
+$\Rightarrow \mathrm{FC}\approx p^{\,|G_q|}$
+\begin{center}\small
+\begin{tabular}{lccc}
+\toprule
+ & C predicho & C obs. & razón\\
+\midrule
+\hippo{} & $59{,}2$ & $12{,}3$ & \mal{0{,}21}\\
+\sys{} & $80{,}3$ & $83{,}8$ & \bien{1{,}04}\\
+\bottomrule
+\end{tabular}
+\end{center}
+\footnotesize
+\sys{} degrada por \emph{acumulación} de $\sim$5\,\% de error por eslabón.
+\hippo{} \emph{colapsa}: sus recursos por consulta (selección $\le 4$, masa,
+holgura del top-5) son fijos y compartidos entre las dos cadenas.
+El planificador invierte el gradiente: con v4, la cadena doble alcanza
+$\mathrm{FC@}5=98{,}7$ --- el segmento históricamente peor pasa a ser el mejor.
+\end{columns}
+\end{frame}
+
+\begin{frame}{Atribución: ablaciones y control sin grafo}
+\begin{columns}[T]
+\column{0.5\textwidth}
+\textbf{Escalera de contribuciones} (sondeo):
+\begin{center}
+\begin{tikzpicture}
+\begin{axis}[width=\textwidth, height=40mm, ymin=88, ymax=100,
+  symbolic x coords={v3, +plan, +salto, +conjunto},
+  xtick=data, ylabel={\scriptsize FC@5}, nodes near coords,
+  every node near coord/.append style={font=\tiny},
+  tick label style={font=\tiny}, label style={font=\tiny}]
+\addplot[mark=*, azul, thick] coordinates {(v3,92.0) (+plan,92.5) (+salto,95.5) (+conjunto,97.5)};
+\end{axis}
+\end{tikzpicture}
+\end{center}
+\footnotesize El plan por sí solo apenas mueve ($+0{,}5$): su valor es
+\emph{habilitar} al salto ($+3{,}0$; cadena doble $86\to96$) y al conjunto
+($+1{,}5$; $+6$ FC@2).
+\column{0.5\textwidth}
+\textbf{¿Grafo o planificador?} Control \emph{sin grafo} con idéntico
+presupuesto LLM (mismo analista/salto/conjunto sobre top-20 denso):
+\begin{center}\small
+\begin{tabular}{lccc}
+\toprule
+banco & v4 & control & $\Delta$ [IC 95\,\%]\\
+\midrule
+2Wiki & $96{,}0$ & $83{,}3$ & \bien{$+12{,}7$} $[+10{,}5,+14{,}9]$\\
+HotpotQA & $90{,}2$ & $83{,}9$ & \bien{$+6{,}3$} $[+4{,}1,+8{,}6]$\\
+\bottomrule
+\end{tabular}
+\end{center}
+\footnotesize Criterio pre-registrado ($\ge 5$ y sig.\ en ambos): \bien{cumplido}
+$\Rightarrow$ la \textbf{representación aporta} más allá del planificador.
+El planificador solo repara cadenas dobles; el puente simple lo repara el grafo
+(oro perdido por el control: $130/141$ ni siquiera en su top-20).
+\end{columns}
+\end{frame}
+
+\begin{frame}{Generalización sin ajuste y robustez al modelo}
+\begin{columns}[T]
+\column{0.55\textwidth}
+\textbf{HotpotQA} ($1\,000\times9\,811$), configuración \emph{congelada} de 2Wiki:
+\begin{center}\small
+\begin{tabular}{lcc}
+\toprule
+ & R@5 & FC@5\\
+\midrule
+BM25 (nuestro) & $72{,}8$ & $49{,}5$\\
+denso \texttt{te3-small} (pub.) & $81{,}3$ & $64{,}9$\\
+\hippo{} (publicado) & $87{,}1$ & $75{,}5$\\
+CatRAG (publicado) & $89{,}5$ & $80{,}4$\\
+\textbf{\sys{} v4} (\texttt{4o-mini}) & $94{,}7$ & $90{,}2$\\
+\textbf{\sys{} v4} (\texttt{deepseek}) & $\mathbf{96{,}0}$ & $\mathbf{93{,}0}$\\
+\bottomrule
+\end{tabular}
+\end{center}
+\footnotesize $+6{,}5$ R@5 / $+12{,}6$ FC@5 sobre CatRAG con \emph{cero} ajuste
+al conjunto.
+\column{0.45\textwidth}
+\textbf{El modelo del planificador es intercambiable} (sondeo 2Wiki, FC@5):
+\begin{center}\small
+\begin{tabular}{lcc}
+\toprule
+modelo & FC@5 & \$/consulta\\
+\midrule
+deepseek-chat & $97{,}5$ & $0{,}0010$\\
+groq gpt-oss-20b & $97{,}0$ & $0{,}0005$\\
+gpt-4o & $96{,}5$ & $0{,}012$\\
+gpt-4o-mini & $96{,}0$ & $0{,}0008$\\
+\bottomrule
+\end{tabular}
+\end{center}
+\footnotesize La ganancia es del \emph{diseño de la tarea}, no del tamaño:
+un 20\,B abierto casi empata con \texttt{gpt-4o} a $1/24$ del coste.
+Estudio completo: $\sim$40\,\$; toda llamada cacheada (reproducción a coste cero).
+\end{columns}
+\end{frame}
+
+% =========================================================================
+\section{Discusión}
+
+\begin{frame}{Discusión: por qué funciona y qué falta}
+\textbf{Tres principios, cada uno elimina una dependencia de la profundidad:}
+\begin{enumerate}
+\item \textbf{Identidad en el índice} (memoria canónica): las «islas» no se
+  multiplican con los saltos; la sinonimia por umbral sí.
+\item \textbf{Hechos como nodos de primera clase}: la masa viaja \emph{a través}
+  del hecho aprobado; los calificadores viajan con él.
+\item \textbf{Recursos que escalan con la cadena} (plan, salto, conjunto):
+  el presupuesto se asigna por hueco, no por consulta --- de ahí la inversión
+  del gradiente en cadenas dobles.
+\end{enumerate}
+\vspace{1mm}
+\textbf{Validez}: reproducción del baseline verificada al decimal contra una
+reproducción independiente; diseño íntegro en conjuntos retenidos; una medición
+por configuración; artefactos y cachés públicos (reproducible a coste cero).
+
+\textbf{Límites y trabajo en curso}: QA extremo a extremo (EM/F1, JSR) pendiente;
+MuSiQue (saltos 2/3/4 etiquetados: contraste directo del modelo multiplicativo);
+inferencia con $n{=}108$ no alcanza significación aislada; heurísticas léxicas
+residuales sustituidas por el analista, pendiente de medir en otros idiomas.
+\end{frame}
+
+% =========================================================================
+\section{Aplicación: asistente clínico sobre las guías de GeSIDA}
+
+\begin{frame}{El caso de uso origen: asistente sobre 8 guías clínicas de GeSIDA}
+\begin{columns}[T]
+\column{0.55\textwidth}
+La arquitectura no nació en Wikipedia: es la generalización del asistente
+clínico VIH \textbf{ya construido}, donde cada pieza tiene su análogo curado:
+\begin{center}\footnotesize
+\begin{tabular}{ll}
+\toprule
+benchmark & clínica (GeSIDA)\\
+\midrule
+memoria canónica del corpus & \textbf{SNOMED\,CT/UMLS} (SCTID)\\
+aserciones reificadas & aserciones con \textbf{deóntica},\\
+ & grado de evidencia y \textbf{vigencia}\\
+enrutador de intención & router clínico (paciente,\\
+ & numérica) $+$ lente de umbrales\\
+pasaje propio & sección normativa de la guía\\
+\bottomrule
+\end{tabular}
+\end{center}
+\column{0.45\textwidth}
+\footnotesize
+\textbf{Estado actual (producción, congelada)}:
+\begin{itemize}\footnotesize
+\item 8 guías; banco de $505$ preguntas con validación clínica en curso;
+\item preguntas multi-guía (nivel 4): 84,9\,\% en el top-20 en modo grafo
+  (denso: $24{,}7$; BM25: $45{,}2$) --- el análogo clínico del multisalto;
+\item curación con humano en el bucle: bandeja de anclajes SNOMED auditable.
+\end{itemize}
+\end{columns}
+\vspace{1mm}
+\centering
+\begin{tikzpicture}[node distance=2.5mm and 6mm]
+  \node[dato, text width=40mm] (qc) {«¿Pauta de TAR en gestante con tuberculosis activa?»};
+  \node[caja, right=of qc, fill=teja!12, draw=teja, text width=40mm] (planc) {\textbf{plan clínico}:\\ TAR en embarazo $\to$ guía Embarazo\\ interacción rifampicina $\to$ guía TB-VIH};
+  \node[caja, right=of planc, text width=34mm] (ev) {cadena de evidencia\\ multi-guía $+$ vigencias};
+  \draw[fl] (qc) -- (planc); \draw[fl] (planc) -- (ev);
+\end{tikzpicture}
+\end{frame}
+
+\begin{frame}{Qué aporta esta investigación a la clínica, y con qué salvaguardas}
+\begin{columns}[T]
+\column{0.55\textwidth}
+\textbf{Los tres portes con evidencia detrás:}
+\begin{enumerate}\small
+\item \textbf{Cadena de evidencia multi-guía}: las preguntas nivel~4 son el
+  análogo del puente; el gradiente invertido predice la mayor ganancia ahí.
+\item \textbf{Abstención fundamentada}: los \emph{huecos sin cubrir} del plan
+  se convierten en «no hay evidencia sobre $X$ en las guías» --- el fallo
+  silencioso ($\mathrm{FC}=0$ respondido de memoria) pasa a ser un aviso
+  explícito y medible por pregunta.
+\item \textbf{JSR clínico}: éxito $=$ cadena normativa completa \emph{y}
+  respuesta correcta \emph{y} vigencia comprobada --- respuesta con expediente.
+\end{enumerate}
+\column{0.45\textwidth}
+\textbf{Salvaguardas no negociables:}
+\begin{itemize}\small
+\item Datos clínicos \textbf{nunca} a proveedores sin garantías (DeepSeek
+  excluido del caso clínico); el diseño es agnóstico al modelo $\Rightarrow$
+  proveedor UE o modelo local;
+\item validación \emph{offline} contra el banco de 505 antes de tocar
+  producción (sistema actual congelado y etiquetado);
+\item terminología curada (SNOMED) como fuente de verdad de identidad;
+  el LLM propone, \textbf{nunca decide identidades};
+\item trazabilidad completa: cada respuesta con su cadena, procedencia
+  y vigencia.
+\end{itemize}
+\end{columns}
+\end{frame}
+
+% =========================================================================
+\begin{frame}{Conclusiones}
+\begin{enumerate}
+\item Un grafo de \textbf{aserciones reificadas} sobre \textbf{entidades
+  canónicas}, consultado con un \textbf{planificador de la evidencia}, recupera
+  la cadena completa donde el estado del arte la rompe:
+  2Wiki $\mathrm{FC@}5$ $\mathbf{97{,}7}$ frente a $65{,}8$ (\hippo{}) y $67{,}6$
+  (CatRAG), mismo backbone; HotpotQA $\mathbf{93{,}0}$ frente a $80{,}4$ con cero ajuste.
+\item La mejora está \emph{atribuida}: representación ($+12{,}7$/$+6{,}3$ FC@5
+  frente al control sin grafo con idéntico presupuesto LLM) $+$ planificador
+  (repara las cadenas dobles: gradiente invertido) --- y es \emph{acumulación},
+  no colapso ($\mathrm{FC}\approx p^{|G_q|}$).
+\item Todo con modelos pequeños e intercambiables ($\sim$0{,}001\,\$/consulta),
+  reproducible a coste cero, y con un camino directo a la clínica: mismas
+  piezas con terminología curada, y la abstención fundamentada como dividendo
+  de seguridad.
+\end{enumerate}
+\vspace{2mm}
+\centering
+\emph{Gracias --- preguntas.}\\[1mm]
+\scriptsize código y artefactos: \texttt{github.com/bjur27r/hiv\_rag} (rama \texttt{eval-wiki2})
+\end{frame}
+
+\end{document}

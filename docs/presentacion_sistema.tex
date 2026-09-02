@@ -168,6 +168,158 @@ y CatRAG (recorrido adaptativo a la consulta). Sus dos límites estructurales:
 \end{itemize}
 \end{frame}
 
+
+\begin{frame}{Notación}
+\centering\footnotesize
+\begin{columns}[T]
+\column{0.5\textwidth}
+\begin{tabular}{@{}ll@{}}
+\toprule
+símbolo & significado\\
+\midrule
+$q$ & pregunta; \ $e(\cdot)\in\mathbb R^{1536}$, $\lVert e(x)\rVert_2{=}1$ \\
+$\mathcal D=\{c_i\}$ & corpus de pasajes; $c$ un pasaje\\
+$G_q$ / $T_k(q)$ & pasajes oro / los $k$ primeros devueltos\\
+$a$; $\tau_a$ & aserción; su frase autocontenida\\
+$\sigma_a=\langle e(q),e(\tau_a)\rangle$ & afinidad pregunta--hecho\\
+$S(q)$; $\tilde\sigma_a$ & hechos aprobados; afinidad corregida\\
+$\varepsilon\in\mathcal E$ & entidad canónica del diccionario\\
+$L(q)$ & entidades enlazadas desde la pregunta\\
+\bottomrule
+\end{tabular}
+\column{0.48\textwidth}
+\begin{tabular}{@{}ll@{}}
+\toprule
+símbolo & significado\\
+\midrule
+$\mathcal A_\varepsilon$; $\pi(\varepsilon)$ & alias de $\varepsilon$; su pasaje propio\\
+$\mathbf v\in\mathbb R^{|V|}$ & vector de personalización (siembra)\\
+$\epsilon=0{,}05$; $w_{\text{enl}}{=}0{,}5$ & ancla débil; peso de enlace\\
+$A$; $\mu_a$; $\tilde A=A\,\mathrm{diag}(\mu)$ & adyacencia; modulación por hecho\\
+$P=D^{-1}\tilde A$; $\lambda=0{,}5$ & transición por filas; amortiguación\\
+$\mathbf p^{(t)}\!\to\mathbf p^{*}$ & masa del paseo; distribución final\\
+$\mathrm{R@}k$; $\mathrm{FC@}k$ & exhaustividad; cadena completa\\
+$p$ (modelo nulo) & fiabilidad por eslabón: $\mathrm{FC}\!\approx\!p^{|G_q|}$\\
+\bottomrule
+\end{tabular}
+\end{columns}
+\vspace{2mm}
+\scriptsize Convención tipográfica: \textcolor{teja}{naranja} = decisiones del
+modelo de lenguaje; \textcolor{azul}{azul} = estructura y álgebra;
+\bien{verde} = evidencia oro o flujo correcto; \mal{rojo} = fallo o deriva.
+\end{frame}
+
+\begin{frame}{El proceso completo de un vistazo: componentes en paralelo}
+\centering
+\begin{tikzpicture}[x=1mm, y=1mm, font=\tiny]
+  % ------- carril de indexacion (arriba)
+  \node[dato]  (corpus) at (3,36)  {corpus $\mathcal D$};
+  \node[caja]  (ext)    at (24,36) {extracción\\ $c\mapsto(E_c,A_c)$};
+  \node[caja]  (dic)    at (49,36) {diccionario\\ $\mathcal E$, alias, $\pi(\varepsilon)$};
+  \node[caja]  (gra)    at (74,36) {grafo $G$\\ $\mathcal C\cup\mathcal E\cup\mathcal A$};
+  \node[dato]  (vec)    at (99,36) {vectores\\ $e(\tau_a)$, fichas, $e(c)$};
+  \draw[fl] (corpus) -- (ext); \draw[fl] (ext) -- (dic);
+  \draw[fl] (dic) -- (gra); \draw[fl] (gra) -- (vec);
+  % ------- carril de consulta (abajo), pasos numerados
+  \node[dato] (q)   at (3,10)   {$q$};
+  \node[caja] (s1)  at (17,10)  {\textcircled{\tiny 1} $e(q)$;\\ $\sigma_a\ \forall a$};
+  \node[caja] (s2)  at (33,10)  {\textcircled{\tiny 2} enlazador\\ $L(q)$};
+  \node[caja, fill=teja!12, draw=teja] (s3) at (50,10) {\textcircled{\tiny 3} analista\\ plan, $S(q)$, huecos};
+  \node[caja] (s4)  at (67,10)  {\textcircled{\tiny 4} siembra\\ $\mathbf v$};
+  \node[caja] (s5)  at (81,10)  {\textcircled{\tiny 5}\textcircled{\tiny 6} $\tilde A$, PPR\\ $\mathbf p^{*}$};
+  \node[caja, fill=teja!12, draw=teja] (s6) at (97,10) {\textcircled{\tiny 7} salto\\ dirigido};
+  \node[caja, fill=teja!12, draw=teja] (s7) at (112,10) {\textcircled{\tiny 8} conjunto\\ final};
+  \node[dato] (out) at (126,10) {top-5};
+  \draw[fl] (q) -- (s1); \draw[fl] (s1) -- (s2); \draw[fl] (s2) -- (s3);
+  \draw[fl] (s3) -- (s4); \draw[fl] (s4) -- (s5); \draw[fl] (s5) -- (s6);
+  \draw[fl] (s6) -- (s7); \draw[fl] (s7) -- (out);
+  % ------- conexiones verticales entre carriles (que usa cada paso)
+  \draw[fl, grisf] (vec.south) to[out=-90,in=90] node[et, right, pos=0.35]{$e(\tau_a)$} (s1.north);
+  \draw[fl, grisf] (dic.south) to[out=-90,in=90] node[et, left, pos=0.3]{alias, fichas} (s2.north);
+  \draw[fl, grisf] (dic.south) to[out=-70,in=110] node[et, right, pos=0.6]{$\pi(\varepsilon)$} (s4.north);
+  \draw[fl, grisf] (gra.south) to[out=-90,in=90] node[et, right, pos=0.45]{$A$} (s5.north);
+  \draw[fl, grisf] (ext.south) to[out=-90,in=120] node[et, left, pos=0.35]{$\tau_a$ candidatos} (s3.north);
+  \begin{scope}[on background layer]
+    \node[fit=(corpus)(vec), draw=grisf, rounded corners=3pt, inner sep=2.5pt,
+      label={[et]above left:{\textbf{indexación} (una vez; sin preguntas)}}] {};
+    \node[fit=(q)(out), draw=grisf, rounded corners=3pt, inner sep=2.5pt,
+      label={[et]below left:{\textbf{consulta} ($\sim$2 llamadas LLM; naranja = LLM)}}] {};
+  \end{scope}
+\end{tikzpicture}
+\vspace{2mm}
+\footnotesize Cada componente de indexación alimenta pasos concretos de la
+consulta: los vectores de hechos a la afinidad \textcircled{\tiny 1}, el
+diccionario al enlazador \textcircled{\tiny 2} y a la siembra
+\textcircled{\tiny 4} (pasajes propios), las aserciones al analista
+\textcircled{\tiny 3} (candidatos), y el grafo al paseo
+\textcircled{\tiny 5}--\textcircled{\tiny 6}.
+\end{frame}
+
+\begin{frame}{Cada componente: entrada, salida y papel}
+\centering\tiny
+\setlength{\tabcolsep}{3pt}\renewcommand{\arraystretch}{1.25}
+\begin{tabular}{@{}p{23mm}p{33mm}p{33mm}p{44mm}@{}}
+\toprule
+componente & entrada & salida & papel en el sistema\\
+\midrule
+extracción reificada & pasaje $c$ & menciones $E_c$; aserciones $A_c=\{(s,r,o,Q,\tau)\}$ & convierte prosa en hechos direccionables con frase $\tau_a$\\
+diccionario (memoria canónica) & todas las menciones $(c,f)$ & entidades $\mathcal E$ con alias $\mathcal A_\varepsilon$, ficha, $\pi(\varepsilon)$ & resuelve la identidad en el índice: elimina las «islas»\\
+grafo canónico $G$ & $A_c$, $\mathcal E$ & nodos $\mathcal C\cup\mathcal E\cup\mathcal A$, aristas de rol/procedencia/mención & soporte del paseo: la masa puede cruzar los hechos\\
+\textcircled{\tiny 1} afinidad & $e(q)$, $\{e(\tau_a)\}$ & $\sigma_a$ para toda aserción & preselección global (un producto matricial)\\
+\textcircled{\tiny 2} enlazador & menciones de $q$, alias & $L(q)\subseteq\mathcal E$ & ancla la pregunta a nodos exactos; aporta la frontera\\
+\textcircled{\tiny 3} analista (LLM) & $q$ + candidatos $\mathrm{Top}_{40}\cup$ frontera & plan (huecos), $S(q)$, huecos sin cubrir & decide \emph{utilidad}, no semejanza; tope $=$ n.º de huecos\\
+\textcircled{\tiny 4} siembra & $S(q)$, $L(q)$, $\pi(\cdot)$, $e(c)$ & $\mathbf v$ (compuerta 1; $+0{,}5\,\pi$; suelo $0{,}05$; $\epsilon$) & concentra el reinicio en la cadena aprobada\\
+\textcircled{\tiny 5}--\textcircled{\tiny 6} PPR modulado & $A$, $\mu(\tilde\sigma)$, $\mathbf v$ & $\mathbf p^{*}$ & difusión estructural con preferencia por hechos afines\\
+\textcircled{\tiny 7} salto dirigido (LLM) & huecos + hechos de $\pi(\varepsilon)$ & nuevos aprobados $\to$ re-siembra & repara el eslabón ausente (alias en otro idioma)\\
+\textcircled{\tiny 8} conjunto final (LLM) & plan + top-12 de $\mathbf p^{*}$ & 5 pasajes que cubren el plan & optimiza $\mathrm{FC@}5$ como propiedad del conjunto\\
+\bottomrule
+\end{tabular}
+\end{frame}
+
+\begin{frame}{Indexación y representación: del texto a la estructura}
+\begin{columns}[T]
+\column{0.5\textwidth}
+\footnotesize
+Tres transformaciones, cada una con su invariante:
+\begin{enumerate}\footnotesize
+\item \textbf{Reificación} ($c \mapsto A_c$): cada hecho atómico del pasaje se
+  promueve a objeto con frase autocontenida $\tau_a$, calificadores y
+  procedencia. \emph{Invariante}: lo que la pregunta comparará (fechas, dosis)
+  viaja dentro de la unidad recuperable.
+\item \textbf{Canonicalización} (menciones $\mapsto \mathcal E$): fichas por
+  mención, candidatos por nombre y por contexto, restricciones duras,
+  adjudicación LLM. \emph{Invariante}: una entidad real $=$ un nodo,
+  con sus alias y su pasaje propio $\pi(\varepsilon)$.
+\item \textbf{Materialización} ($\mathcal C,\mathcal E,\mathcal A \mapsto G$):
+  grafo tripartito sin aristas de sinonimia. \emph{Invariante}: todo camino
+  entidad$\to$entidad pasa por un hecho explícito y ponderable.
+\end{enumerate}
+Tamaños reales (2Wiki): $6\,119$ pasajes $\to$ $47\,999$ aserciones,
+$26\,940$ entidades, $165$k aristas; coste $\approx 3$\,\$ y $\sim$40 min,
+una única vez.
+\column{0.48\textwidth}
+\centering
+\begin{tikzpicture}[x=1mm, y=1mm, font=\tiny]
+  \node[chk, text width=44mm, align=left] (tx) at (25,40)
+    {\textbf{texto}: «Sonia Haft Greene Lovecraft Davis (1883--1972)\dots\ her
+     two-year marriage to H.\,P. Lovecraft\dots»};
+  \node[aser, text width=44mm, align=left] (as) at (25,26)
+    {\textbf{aserción}: $s{=}$Sonia H.\,G.\,L.\ Davis; $r{=}$\textsc{spouse\_of};
+     $o{=}$H.\,P. Lovecraft;\\ $\tau$: «Sonia\dots\ was married to H.\,P. Lovecraft.»};
+  \node[caja, text width=44mm, align=left] (en) at (25,13)
+    {\textbf{entrada canónica}: \texttt{can:h.\,p.\,lovecraft};
+     alias \{H.\,P.~L.; Howard Phillips L.\};\\ $\pi=$ \emph{H. P. Lovecraft}};
+  \node[ent] (n1) at (10,2) {$\varepsilon$};
+  \node[aser, inner sep=2pt] (n2) at (25,2) {$a$};
+  \node[chk, inner sep=2pt] (n3) at (40,2) {$c$};
+  \draw[fl] (tx) -- node[et, right]{extracción} (as);
+  \draw[fl] (as) -- node[et, right]{canonicalización} (en);
+  \draw[fl] (en) -- node[et, left, pos=0.7]{materialización} (n2);
+  \draw[fl] (n1) -- (n2); \draw[fl] (n2) -- (n3);
+\end{tikzpicture}
+\end{columns}
+\end{frame}
+
 \begin{frame}{Pieza 1 · La unidad semántica: aserción reificada, no triplete}
 \centering
 \begin{tikzpicture}[node distance=4mm and 8mm]
@@ -423,21 +575,21 @@ $p^*(\text{Roehler})=0{,}0063$, primer distractor $0{,}0004$
 \end{enumerate}
 \column{0.46\textwidth}
 \centering
-\begin{tikzpicture}[node distance=2.2mm and 4mm, font=\tiny]
-  \node[dato] (q) {$q$};
-  \node[ent, below left=4mm and 1mm of q, fill=verde!12] (e1) {$\varepsilon_1$\\ \tiny$\mathbf v{=}1$ \textcircled{\tiny 4}};
-  \node[ent, below right=4mm and 1mm of q, fill=verde!12] (e2) {$\varepsilon_2$\\ \tiny$\mathbf v{=}1$ \textcircled{\tiny 4}};
-  \node[aser, below=5mm of q, text width=17mm] (aa) {hecho $a\in S(q)$\\ $\mu{=}1$ \textcircled{\tiny 5}};
-  \node[chk, below left=4mm and 0mm of aa, text width=16mm] (c1) {$\pi(\varepsilon_1)$\\ \tiny$+0{,}5$ \textcircled{\tiny 4}};
-  \node[chk, below right=4mm and 0mm of aa, text width=16mm] (c2) {$\pi(\varepsilon_2)$\\ \tiny$+0{,}5$ \textcircled{\tiny 4}};
-  \node[chk, right=9mm of c2, densely dotted, text width=13mm] (cx) {resto\\ \tiny$0{,}05\cos$ \textcircled{\tiny 4}};
-  \draw[fl, grisf] (q) -- node[et, left]{\textcircled{\tiny 1}\textcircled{\tiny 2}\textcircled{\tiny 3}} (aa);
+\begin{tikzpicture}[x=1mm, y=1mm, font=\tiny]
+  \node[dato] (q)  at (34,42) {$q$ \ \textcircled{\tiny 1}\textcircled{\tiny 2}\textcircled{\tiny 3}};
+  \node[ent, fill=verde!12] (e1) at (12,30) {$\varepsilon_1$: $\mathbf v{=}1$ \textcircled{\tiny 4}};
+  \node[ent, fill=verde!12] (e2) at (56,30) {$\varepsilon_2$: $\mathbf v{=}1$ \textcircled{\tiny 4}};
+  \node[aser, text width=22mm] (aa) at (34,20) {hecho $a\in S(q)$\\ $\mu{=}1$ \textcircled{\tiny 5}};
+  \node[chk, text width=17mm] (c1) at (10,7) {$\pi(\varepsilon_1)$: $+0{,}5$ \textcircled{\tiny 4}};
+  \node[chk, text width=17mm] (c2) at (40,7) {$\pi(\varepsilon_2)$: $+0{,}5$ \textcircled{\tiny 4}};
+  \node[chk, densely dotted, text width=15mm] (cx) at (65,7) {resto:\\ $0{,}05\cos$ \textcircled{\tiny 4}};
+  \draw[fl, grisf] (q) -- (e1); \draw[fl, grisf] (q) -- (e2);
   \draw[fl] (e1) -- (aa); \draw[fl] (e2) -- (aa);
-  \draw[fl] (aa) -- (c1); \draw[fl] (aa) -- (c2);
-  \draw[flok, very thick] (e1) to[out=-100,in=170] node[et, left]{\textcircled{\tiny 6} paseo} (c1);
-  \draw[flmal, dashed] (e2) to[out=-30,in=90] node[et, right]{\textcircled{\tiny 7} salto} (cx);
-  \node[et, below=2mm of c2, text width=48mm, align=center]
-   {\textcircled{\tiny 8} $\mathbf p^*$ restringido a pasajes\\ $\to$ conjunto que cubre el plan};
+  \draw[fl] (aa) -- node[et, left]{procedencia} (c2);
+  \draw[flok, very thick] (e1) to[out=-90,in=90] node[et, left]{\textcircled{\tiny 6} paseo} (c1);
+  \draw[flmal, dashed] (e2) to[out=-45,in=90] node[et, right]{\textcircled{\tiny 7} salto} (cx);
+  \node[et, text width=58mm] at (34,-3)
+   {\textcircled{\tiny 8} $\mathbf p^{*}$ restringido a pasajes $\to$ conjunto que cubre el plan};
 \end{tikzpicture}
 \end{columns}
 \end{frame}
@@ -510,49 +662,45 @@ modelos de una fracción de ese coste.
 \end{frame}
 
 
-\begin{frame}{Estudio de caso: la misma consulta ante los tres sistemas}
-\footnotesize
+\begin{frame}{Estudio de caso: tres mecanismos de recuperación ante la misma consulta}
+\centering\scriptsize
 \emph{«Which film has the director who is older, God's Gift to Women or Aldri annet enn br\aa k?»}
---- oro: los dos filmes y sus directores (\textbf{Michael Curtiz}, \textbf{Edith Carlmar}).
+--- oro: 2 filmes $+$ sus directores (\textbf{M. Curtiz}, \textbf{E. Carlmar}).
 \vspace{1mm}
 \begin{columns}[T]
-\column{0.34\textwidth}
-\centering \textbf{\hippo{} (medido)}\\[0.5mm]
-{\scriptsize
-1. \bien{Aldri annet enn br\aa k}\\
-2. \bien{God's Gift to Women}\\
-3. \bien{Edith Carlmar}\\
-4. \mal{Altid ballade}\\
-5. \mal{Bedre enn sitt rykte}\\[0.5mm]
-$\mathrm{R@}5=0{,}75$; $\mathrm{FC@}5=\mal{0}$}\\[0.5mm]
-\scriptsize\emph{Deriva a una sola rama}: los
-puestos 4--5 son \emph{otras películas de Carlmar}; Curtiz no se siembra
-nunca.
-\column{0.32\textwidth}
-\centering \textbf{CatRAG (mecanismo)}\\[0.5mm]
-\scriptsize Re-pondera las aristas del \emph{mismo} grafo de tripletes ante la
-consulta (código no liberado). No puede crear la semilla ausente ni resolver
-la identidad de menciones: hereda las islas y el presupuesto fijo por
-consulta. En 2Wiki publica $\mathrm{FCR}=67{,}6$
-($+1{,}5$ sobre su base): la re-ponderación \emph{sola} apenas repara la
-cadena.
-\column{0.34\textwidth}
-\centering \textbf{\sys{} v4 (medido)}\\[0.5mm]
-{\scriptsize
-1. \bien{God's Gift to Women}\\
-2. \bien{Michael Curtiz}\\
-3. \bien{Aldri annet enn br\aa k}\\
-4. \bien{Edith Carlmar}\\
-5. Altid ballade\\[0.5mm]
-$\mathrm{R@}5=1$; $\mathrm{FC@}5=\bien{1}$}\\[0.5mm]
-\scriptsize El plan declara \emph{ambos} directores como huecos; la compuerta
-y el pasaje propio siembran a Curtiz \emph{y} a Carlmar: recursos por cadena,
-no por consulta.
+\column{0.33\textwidth}\centering
+\textbf{\hippo{} (medido)}\\[0.8mm]
+\begin{tikzpicture}[x=1mm, y=1mm, font=\tiny, node distance=1.6mm]
+  \node[caja, text width=40mm] (h1) {\textbf{siembra} $=$ frases de los triples filtrados:\\ \{Aldri\dots, God's Gift\dots, \bien{E. Carlmar}\}};
+  \node[caja, below=of h1, text width=40mm] (h2) {\textbf{paseo con $T$ estática}: la masa difunde por el vecindario más denso --- las \emph{otras películas} de Carlmar};
+  \node[caja, below=of h2, text width=40mm, fill=teja!18, draw=teja] (h3) {\mal{Curtiz no se siembra nunca}: el filtro ($\le 4$ triples) cubrió una sola rama y $T$ no depende de $q$};
+  \node[dato, below=of h3, text width=40mm] (h4) {top-5: 3 oros $+$ 2 filmes de Carlmar\\ $\mathrm{R@}5{=}0{,}75$; $\mathrm{FC@}5{=}\mal{0}$};
+  \draw[fl] (h1) -- (h2); \draw[fl] (h2) -- (h3); \draw[fl] (h3) -- (h4);
+\end{tikzpicture}
+\column{0.30\textwidth}\centering
+\textbf{CatRAG (su mecanismo)}\\[0.8mm]
+\begin{tikzpicture}[x=1mm, y=1mm, font=\tiny, node distance=1.6mm]
+  \node[caja, text width=37mm] (c1) {\textbf{misma siembra} y \textbf{mismo grafo} de tripletes que \hippo{}};
+  \node[caja, below=of c1, text width=37mm] (c2) {re-pondera las aristas próximas a las semillas según $q$ (anclas $\epsilon$, pesos por LLM)};
+  \node[caja, below=of c2, text width=37mm, fill=teja!18, draw=teja] (c3) {\mal{no puede crear la semilla ausente} ni fusionar identidades: hereda el modo de fallo};
+  \node[dato, below=of c3, text width=37mm] (c4) {publicado (2Wiki, mismo backbone):\\ $\mathrm{FCR}=67{,}6$ ($+1{,}5$ sobre su base)};
+  \draw[fl] (c1) -- (c2); \draw[fl] (c2) -- (c3); \draw[fl] (c3) -- (c4);
+\end{tikzpicture}
+\column{0.33\textwidth}\centering
+\textbf{\sys{} (medido)}\\[0.8mm]
+\begin{tikzpicture}[x=1mm, y=1mm, font=\tiny, node distance=1.6mm]
+  \node[caja, fill=teja!12, draw=teja, text width=40mm] (n1) {\textbf{plan}: director de $A\to[X]$; director de $B\to[X]$; fechas de ambos $\Rightarrow$ aprueba \emph{los dos} hechos \textsc{directed}};
+  \node[caja, below=of n1, text width=40mm] (n2) {\textbf{compuerta}: $\mathbf v{=}1$ en \texttt{can:curtiz} y \texttt{can:carlmar}; $+0{,}5$ a \emph{sus pasajes propios}};
+  \node[caja, below=of n2, text width=40mm] (n3) {paseo con $\mu{=}1$ en ambos hechos; el \textbf{conjunto} exige cubrir los 4 huecos};
+  \node[dato, below=of n3, text width=40mm, fill=verde!8] (n4) {top-4 $=$ los 4 oros\\ $\mathrm{R@}5{=}1$; $\mathrm{FC@}5{=}\bien{1}$};
+  \draw[fl] (n1) -- (n2); \draw[fl] (n2) -- (n3); \draw[fl] (n3) -- (n4);
+\end{tikzpicture}
 \end{columns}
-\vspace{1.5mm}
-\scriptsize El contraste ilustra la tesis: re-ponderar un grafo pobre
-(CatRAG) no sustituye a \emph{representar mejor} (aserciones canónicas) ni a
-\emph{planificar la evidencia} (asignación por hueco).
+\vspace{1mm}
+\scriptsize La diferencia es de \emph{mecanismo}, no de grado: los recursos de
+\hippo{}/CatRAG se fijan \textbf{por consulta} (una siembra, un grafo, una
+$T$); los nuestros se asignan \textbf{por hueco del plan} --- por eso la
+segunda cadena existe para el sistema antes de empezar a caminar.
 \end{frame}
 
 \begin{frame}{El hallazgo central: acumulación frente a colapso con la profundidad}

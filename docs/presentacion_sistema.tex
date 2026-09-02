@@ -211,48 +211,48 @@ modelo de lenguaje; \textcolor{azul}{azul} = estructura y álgebra;
 
 \begin{frame}{El proceso completo de un vistazo: componentes en paralelo}
 \centering
+\resizebox{0.99\textwidth}{!}{%
 \begin{tikzpicture}[x=1mm, y=1mm, font=\tiny]
   % ------- carril de indexacion (arriba)
-  \node[dato]  (corpus) at (3,36)  {corpus $\mathcal D$};
-  \node[caja]  (ext)    at (24,36) {extracción\\ $c\mapsto(E_c,A_c)$};
-  \node[caja]  (dic)    at (49,36) {diccionario\\ $\mathcal E$, alias, $\pi(\varepsilon)$};
-  \node[caja]  (gra)    at (74,36) {grafo $G$\\ $\mathcal C\cup\mathcal E\cup\mathcal A$};
-  \node[dato]  (vec)    at (99,36) {vectores\\ $e(\tau_a)$, fichas, $e(c)$};
+  \node[dato, minimum height=9mm]  (corpus) at (6,46)   {corpus $\mathcal D$};
+  \node[caja, minimum height=9mm]  (ext)    at (36,46)  {\textbf{extracción}\\ $c\mapsto(E_c,A_c)$};
+  \node[caja, minimum height=9mm]  (dic)    at (70,46)  {\textbf{diccionario}\\ $\mathcal E$, alias, $\pi(\varepsilon)$};
+  \node[caja, minimum height=9mm]  (gra)    at (104,46) {\textbf{grafo} $G$\\ $\mathcal C\cup\mathcal E\cup\mathcal A$};
+  \node[dato, minimum height=9mm]  (vec)    at (136,46) {\textbf{vectores}\\ $e(\tau_a)$, fichas, $e(c)$};
   \draw[fl] (corpus) -- (ext); \draw[fl] (ext) -- (dic);
   \draw[fl] (dic) -- (gra); \draw[fl] (gra) -- (vec);
-  % ------- carril de consulta (abajo), pasos numerados
-  \node[dato] (q)   at (3,10)   {$q$};
-  \node[caja] (s1)  at (17,10)  {\textcircled{\tiny 1} $e(q)$;\\ $\sigma_a\ \forall a$};
-  \node[caja] (s2)  at (33,10)  {\textcircled{\tiny 2} enlazador\\ $L(q)$};
-  \node[caja, fill=teja!12, draw=teja] (s3) at (50,10) {\textcircled{\tiny 3} analista\\ plan, $S(q)$, huecos};
-  \node[caja] (s4)  at (67,10)  {\textcircled{\tiny 4} siembra\\ $\mathbf v$};
-  \node[caja] (s5)  at (81,10)  {\textcircled{\tiny 5}\textcircled{\tiny 6} $\tilde A$, PPR\\ $\mathbf p^{*}$};
-  \node[caja, fill=teja!12, draw=teja] (s6) at (97,10) {\textcircled{\tiny 7} salto\\ dirigido};
-  \node[caja, fill=teja!12, draw=teja] (s7) at (112,10) {\textcircled{\tiny 8} conjunto\\ final};
-  \node[dato] (out) at (126,10) {top-5};
+  % ------- carril de consulta (abajo)
+  \node[dato] (q)   at (4,8)    {$q$};
+  \node[caja, minimum height=9mm] (s1)  at (21,8)  {\textcircled{\tiny 1} $e(q)$\\ $\sigma_a\ \forall a$};
+  \node[caja, minimum height=9mm] (s2)  at (41,8)  {\textcircled{\tiny 2} enlazador\\ $L(q)$};
+  \node[caja, minimum height=9mm, fill=teja!12, draw=teja] (s3) at (63,8) {\textcircled{\tiny 3} \textbf{analista}\\ plan, $S(q)$};
+  \node[caja, minimum height=9mm] (s4)  at (84,8)  {\textcircled{\tiny 4} siembra\\ $\mathbf v$};
+  \node[caja, minimum height=9mm] (s5)  at (102,8) {\textcircled{\tiny 5}\textcircled{\tiny 6} PPR\\ $\mathbf p^{*}$};
+  \node[caja, minimum height=9mm, fill=teja!12, draw=teja] (s6) at (120,8) {\textcircled{\tiny 7} \textbf{salto}};
+  \node[caja, minimum height=9mm, fill=teja!12, draw=teja] (s7) at (137,8) {\textcircled{\tiny 8} \textbf{conjunto}};
+  \node[dato] (out) at (151,8) {top-5};
   \draw[fl] (q) -- (s1); \draw[fl] (s1) -- (s2); \draw[fl] (s2) -- (s3);
   \draw[fl] (s3) -- (s4); \draw[fl] (s4) -- (s5); \draw[fl] (s5) -- (s6);
   \draw[fl] (s6) -- (s7); \draw[fl] (s7) -- (out);
-  % ------- conexiones verticales entre carriles (que usa cada paso)
-  \draw[fl, grisf] (vec.south) to[out=-90,in=90] node[et, right, pos=0.35]{$e(\tau_a)$} (s1.north);
-  \draw[fl, grisf] (dic.south) to[out=-90,in=90] node[et, left, pos=0.3]{alias, fichas} (s2.north);
-  \draw[fl, grisf] (dic.south) to[out=-70,in=110] node[et, right, pos=0.6]{$\pi(\varepsilon)$} (s4.north);
-  \draw[fl, grisf] (gra.south) to[out=-90,in=90] node[et, right, pos=0.45]{$A$} (s5.north);
-  \draw[fl, grisf] (ext.south) to[out=-90,in=120] node[et, left, pos=0.35]{$\tau_a$ candidatos} (s3.north);
+  % ------- buses ortogonales (cada conexion a su altura: sin cruces)
+  \draw[fl, grisf] (vec.south)  |- (146,36) -| node[et, above, pos=0.25]{$e(\tau_a)$, $e(c)$} (21,36) -- (s1.north);
+  \draw[fl, grisf] (dic.south)  |- (60,32)  -| node[et, above, pos=0.25]{alias, fichas} (41,32) -- (s2.north);
+  \draw[fl, grisf] (ext.south)  |- (46,28)  -| node[et, above, pos=0.55]{$\tau_a$ candidatos} (63,28) -- (s3.north);
+  \draw[fl, grisf] (dic.south east) |- (92,24) -| node[et, above, pos=0.55]{$\pi(\varepsilon)$} (84,24) -- (s4.north);
+  \draw[fl, grisf] (gra.south)  |- (104,20) -| node[et, above, pos=0.4]{$A$} (102,20) -- (s5.north);
   \begin{scope}[on background layer]
-    \node[fit=(corpus)(vec), draw=grisf, rounded corners=3pt, inner sep=2.5pt,
+    \node[fit=(corpus)(vec), draw=grisf, rounded corners=3pt, inner sep=3pt,
       label={[et]above left:{\textbf{indexación} (una vez; sin preguntas)}}] {};
-    \node[fit=(q)(out), draw=grisf, rounded corners=3pt, inner sep=2.5pt,
-      label={[et]below left:{\textbf{consulta} ($\sim$2 llamadas LLM; naranja = LLM)}}] {};
+    \node[fit=(q)(out), draw=grisf, rounded corners=3pt, inner sep=3pt,
+      label={[et]below left:{\textbf{consulta} ($\sim$2 llamadas LLM; naranja $=$ decisión LLM)}}] {};
   \end{scope}
-\end{tikzpicture}
-\vspace{2mm}
-\footnotesize Cada componente de indexación alimenta pasos concretos de la
-consulta: los vectores de hechos a la afinidad \textcircled{\tiny 1}, el
+\end{tikzpicture}}
+\vspace{1.5mm}
+\footnotesize Cada artefacto de indexación alimenta pasos concretos de la
+consulta (buses grises): los vectores a la afinidad \textcircled{\tiny 1}, el
 diccionario al enlazador \textcircled{\tiny 2} y a la siembra
-\textcircled{\tiny 4} (pasajes propios), las aserciones al analista
-\textcircled{\tiny 3} (candidatos), y el grafo al paseo
-\textcircled{\tiny 5}--\textcircled{\tiny 6}.
+\textcircled{\tiny 4}, las aserciones al analista \textcircled{\tiny 3} y el
+grafo al paseo \textcircled{\tiny 5}--\textcircled{\tiny 6}.
 \end{frame}
 
 \begin{frame}{Cada componente: entrada, salida y papel}
@@ -592,6 +592,80 @@ $p^*(\text{Roehler})=0{,}0063$, primer distractor $0{,}0004$
    {\textcircled{\tiny 8} $\mathbf p^{*}$ restringido a pasajes $\to$ conjunto que cubre el plan};
 \end{tikzpicture}
 \end{columns}
+\end{frame}
+
+\begin{frame}{Arquitectura agéntica: deliberación acotada, control algorítmico}
+\begin{columns}[T]
+\column{0.5\textwidth}
+\footnotesize
+Tres \textbf{roles LLM} con contrato JSON estricto, orquestados por un flujo
+\emph{determinista} (no hay bucle libre de agente):
+\begin{itemize}\footnotesize
+\item \textbf{Analista} (siempre; 1 llamada): comprensión $+$ plan $+$
+  selección. Reglas duras: entidades no vistas $\Rightarrow[X]$; prohibido el
+  conocimiento paramétrico; tope $=$ n.º de huecos.
+\item \textbf{Reparador} (condicional, $\sim$20\,\%): rellena huecos con
+  candidatos \emph{estructurales} ($\pi(\varepsilon)$) $+$ coseno del hueco.
+\item \textbf{Empaquetador} (salvo comparación): conjunto de 5 que cubre el
+  plan; guarda conservadora (el top-2 del paseo se preserva).
+\end{itemize}
+\textbf{Guardarraíles}: presupuesto $\le 3$ llamadas; degradación suave a
+denso si nada se aprueba; salidas validadas (JSON, índices en rango); caché
+por (modelo, consigna) $\Rightarrow$ determinismo y re-ejecución a coste
+cero. \emph{El LLM decide dentro de contratos; el algoritmo conserva el
+control} --- a diferencia de los agentes iterativos (IRCoT), la latencia y el
+coste están acotados por diseño.
+\column{0.48\textwidth}
+\centering
+\begin{tikzpicture}[x=1mm, y=1mm, font=\tiny]
+  \node[caja, text width=30mm, minimum height=8mm] (orq) at (30,40) {\textbf{orquestador}\\ (flujo determinista)};
+  \node[caja, fill=teja!12, draw=teja, text width=20mm] (r1) at (6,26)  {\textbf{analista}\\ plan $+$ $S(q)$};
+  \node[caja, fill=teja!12, draw=teja, text width=20mm] (r2) at (30,26) {\textbf{reparador}\\ huecos};
+  \node[caja, fill=teja!12, draw=teja, text width=20mm] (r3) at (54,26) {\textbf{empaquetador}\\ conjunto de 5};
+  \node[dato, text width=17mm] (h1) at (6,12)  {diccionario\\ $\mathcal E$, $\pi(\varepsilon)$};
+  \node[dato, text width=15mm] (h2) at (28,12) {grafo $G$\\ $+$ PPR};
+  \node[dato, text width=17mm] (h3) at (52,12) {vectores\\ $\sigma_a$, $e(c)$};
+  \draw[fl] (orq) -- (r1); \draw[fl] (orq) -- (r2); \draw[fl] (orq) -- (r3);
+  \draw[fl, grisf] (r1) -- (h1); \draw[fl, grisf] (r1) -- (h3);
+  \draw[fl, grisf] (r2) -- (h1); \draw[fl, grisf] (r2) -- (h3);
+  \draw[fl, grisf] (r3) -- (h2);
+  \node[et, text width=62mm] at (30,2)
+    {los roles consultan las \emph{herramientas} (diccionario, grafo, vectores);\\
+     nunca escriben en ellas: la memoria solo cambia en indexación};
+\end{tikzpicture}
+\end{columns}
+\end{frame}
+
+\begin{frame}{Materiales}
+\centering\scriptsize
+\setlength{\tabcolsep}{4pt}\renewcommand{\arraystretch}{1.2}
+\textbf{Conjuntos de datos} (subconjuntos de reproducción publicados con \hippo{}):\\[0.5mm]
+\begin{tabular}{@{}lllll@{}}
+\toprule
+dataset & origen & preguntas & pasajes & estructura de la evidencia\\
+\midrule
+2WikiMultihopQA & Ho et al.\ 2020 (Wikipedia$+$Wikidata) & $1\,000$ & $6\,119$ & 2--4 oros; 4 tipos etiquetados\\
+HotpotQA & Yang et al.\ 2018 (Wikipedia) & $1\,000$ & $9\,811$ & 2 oros; \emph{bridge} / \emph{comparison}\\
+\bottomrule
+\end{tabular}\\[1.5mm]
+\textbf{Modelos} (paridad estricta entre sistemas):\\[0.5mm]
+\begin{tabular}{@{}llll@{}}
+\toprule
+papel & modelo & dimensión / tamaño & uso\\
+\midrule
+codificador vectorial & \texttt{text-embedding-3-small} & $1536$\,d & todos los sistemas y espacios\\
+extracción e índice & \texttt{gpt-4o-mini} & --- & aserciones, diccionario (lotes, caché)\\
+planificador (consulta) & \texttt{deepseek-chat} (V3) & --- & configuración adoptada\\
+alternativas validadas & \texttt{gpt-oss-20b} (Groq) / \texttt{gpt-4o-mini} & 20\,B / --- & $97{,}0$ / $96{,}0$ FC@5 en sondeo\\
+\bottomrule
+\end{tabular}\\[1.5mm]
+\textbf{Sistemas de referencia}: \hippo{} ejecutado con su código oficial y
+los mismos modelos (reproducción validada al decimal); CatRAG por sus cifras
+publicadas con este mismo backbone (código no liberado); BM25 propio.\\[1mm]
+\textbf{Infraestructura}: CPU de sobremesa (sin GPU); cachés persistentes
+(SQLite/npz) para toda llamada y vector; coste total del estudio
+$\approx 40$\,\$; cualquier medición es re-ejecutable de forma determinista a
+coste cero. Código y artefactos: \texttt{github.com/bjur27r/hiv\_rag}.
 \end{frame}
 
 \begin{frame}{Protocolo experimental: paridad estricta y separación de datos}

@@ -577,6 +577,47 @@ pasaje propio & sección normativa de la guía\\
 \end{tikzpicture}
 \end{frame}
 
+
+\begin{frame}{GeSIDA de punta a punta: la metodología sobre un caso multi-guía}
+\centering
+\begin{tikzpicture}[node distance=1.6mm and 2.5mm, font=\tiny]
+  % ---------- fila 1: pregunta -> analista -> linker
+  \node[dato, text width=31mm] (qq) {\textbf{Pregunta}\\ «¿Se mantiene \textbf{dolutegravir} en una \textbf{gestante} que inicia \textbf{rifampicina}?»};
+  \node[caja, right=of qq, fill=teja!12, draw=teja, text width=44mm, align=left] (an) {\textbf{Analista} · plan clínico (huecos):\\
+    1. pauta de DTG en embarazo $\to$ guía \textbf{Embarazo}\\
+    2. interacción DTG--rifampicina $\to$ guía \textbf{TB-VIH}\\
+    3. ajuste de dosis si coadministración $\to$ $[X]$};
+  \node[caja, right=of an, text width=33mm] (lk) {\textbf{Enlazador SNOMED}\\ dolutegravir $\to$ \texttt{sct:DTG} \checkmark\\ rifampicina $\to$ \texttt{sct:RIF} \checkmark\\ gestación $\to$ \texttt{sct:EMB} \checkmark};
+  \draw[fl] (qq) -- (an); \draw[fl] (an) -- (lk);
+  % ---------- fila 2: el grafo clinico (multisalto)
+  \node[chk, below=7mm of qq, xshift=2mm, text width=27mm] (g1) {\textbf{guía Embarazo} · §pauta\\ \emph{pasaje propio} de la\\ recomendación en gestación};
+  \node[aser, right=of g1, text width=36mm, align=left] (a1) {\textbf{aserción} $a_1$ · \textsc{RecomendacionTerapeutica}\\
+    intervención: dolutegravir\\ población: \textbf{gestantes}\\ deóntica: SE RECOMIENDA (A-I)\\ vigencia: 2022 \checkmark};
+  \node[ent, right=of a1, fill=verde!12] (dtg) {\texttt{sct:DTG}\\ \textbf{entidad puente}};
+  \node[aser, right=of dtg, text width=37mm, align=left] (a2) {\textbf{aserción} $a_2$ · \textsc{Interaccion}\\
+    fármacos: DTG $+$ \textbf{rifampicina}\\ efecto: inducción $\downarrow$ niveles\\ ajuste: \textbf{50 mg/12 h} (numérico)\\ deóntica: AJUSTAR DOSIS};
+  \node[chk, right=of a2, text width=24mm] (g2) {\textbf{guía TB-VIH}\\ §interacciones};
+  \draw[fl] (a1) -- (g1); \draw[fl] (dtg) -- (a1); \draw[fl] (dtg) -- (a2); \draw[fl] (a2) -- (g2);
+  \node[et, below=0.5mm of dtg, text width=30mm]{siembra: compuerta dura\\ $+$ pasaje propio};
+  % ---------- fila 3: ppr/salto -> conjunto -> respuesta
+  \node[caja, below=8mm of g1, xshift=6mm, text width=33mm] (ppr2) {\textbf{PPR modulado}\\ la masa cruza $a_1$ y $a_2$ ($\mu{=}1$):\\ \emph{un solo grafo, dos guías}};
+  \node[caja, right=of ppr2, fill=teja!12, draw=teja, text width=36mm] (sal) {\textbf{Salto dirigido} (hueco 3)\\ «dosis en coadministración» $\to$\\ aserciones de §interacciones\\ $\to$ aprueba $a_2$ \checkmark};
+  \node[caja, right=of sal, fill=teja!12, draw=teja, text width=30mm] (cj) {\textbf{Conjunto final}\\ pasajes que cubren\\ los 3 huecos del plan};
+  \node[dato, right=of cj, text width=27mm, fill=verde!8] (resp) {\textbf{Respuesta con expediente}\\ cadena $+$ procedencia\\ $+$ vigencia $+$ dosis\\[1pt]
+    \mal{hueco sin cubrir} $\Rightarrow$\\ \textbf{abstención fundamentada}};
+  \draw[fl] (ppr2) -- (sal); \draw[fl] (sal) -- (cj); \draw[fl] (cj) -- (resp);
+  \draw[fl, grisf] (lk.south) to[out=-90,in=45] (dtg.north east);
+  \draw[fl, grisf] (g1.south) to[out=-90,in=170] (ppr2.west);
+\end{tikzpicture}
+
+\vspace{1mm}
+\scriptsize El multisalto clínico: la entidad canónica \texttt{sct:DTG} es el
+\emph{puente} entre dos guías distintas --- exactamente la estructura del
+puente de 2Wiki, con SNOMED en el papel de la memoria canónica. Contenido
+abreviado con fines ilustrativos; las aserciones reales llevan guía, sección,
+página y fecha de vigencia exactas.
+\end{frame}
+
 \begin{frame}{Qué aporta esta investigación a la clínica, y con qué salvaguardas}
 \begin{columns}[T]
 \column{0.55\textwidth}

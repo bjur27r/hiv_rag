@@ -204,6 +204,45 @@ y CatRAG (recorrido adaptativo a la consulta). Sus dos límites estructurales:
 \end{itemize}
 \end{frame}
 
+
+\begin{frame}{Fundamento de la representación: tres propiedades de la aserción-nodo}
+\begin{columns}[T]
+\column{0.56\textwidth}
+\begin{enumerate}\footnotesize
+\item \textbf{Modulabilidad por consulta.} En un grafo de tripletes, la
+  distribución de transición desde una entidad queda fijada en indexación y es
+  idéntica para toda consulta; CatRAG la re-pondera, pero sobre el mismo
+  soporte binario. Con hechos-nodo, cada hecho es una unidad
+  \emph{direccionable}: $P(\varepsilon\!\to\!a)\propto\mu_a(q)$ con
+  $\mu_a=\tfrac14+\tfrac34\,\tilde\sigma_a(q)$, y los hechos aprobados por el
+  analista transitan a peso completo.
+\item \textbf{Clausura $n$-aria.} El triplete $(s,r,o)$ impone binariedad:
+  participantes adicionales y calificadores (fechas, dosis) se pierden o
+  generan nodos literales. La aserción los conserva en $\tau_a$ y en sus
+  roles: \emph{la unidad recuperada ya contiene el dato que la pregunta
+  compara}.
+\item \textbf{Semántica de la frase.} La afinidad se computa sobre
+  $e(\tau_a)$ ---una frase autocontenida--- y no sobre la concatenación de
+  etiquetas; el sistema es robusto al ruido de etiquetado del extractor.
+\end{enumerate}
+\column{0.42\textwidth}
+\centering
+\begin{tikzpicture}[node distance=1.2mm and 2mm, font=\tiny]
+  \node[ent] (c) {Michael Curtiz\\ \tiny 30 hechos en su pasaje};
+  \node[aser, above right=2mm and 5mm of c, text width=21mm] (h1) {\textsc{date\_of\_birth}\\ 24-12-1886};
+  \node[aser, right=5mm of c, text width=21mm] (h2) {\textsc{directed}\\ Casablanca};
+  \node[aser, below right=2mm and 5mm of c, text width=21mm] (h3) {\textsc{directed}\\ (28 más\dots)};
+  \draw[flok, very thick] (c) -- node[et, above, sloped]{$\mu=1$ (aprobado)} (h1);
+  \draw[fl, opacity=0.35] (c) -- node[et, below, sloped]{$\mu=0{,}3$} (h2);
+  \draw[fl, opacity=0.35] (c) -- (h3);
+  \node[et, below=2mm of h3, text width=40mm, align=center]
+    {consulta: «\emph{who is older\dots}»\\
+     grafo plano: 30 aristas \mal{indistinguibles};\\
+     reificado: la masa \bien{se concentra} en el hecho pertinente};
+\end{tikzpicture}
+\end{columns}
+\end{frame}
+
 \begin{frame}{Pieza 2 · Memoria canónica de entidades: matar las «islas» en el índice}
 \begin{columns}[T]
 \column{0.5\textwidth}
@@ -327,6 +366,82 @@ Aporta $+6$ puntos de FC@2 (orden temprano).
 \end{columns}
 \end{frame}
 
+
+\begin{frame}{El vector de personalización $\mathbf v$, con valores observados}
+\footnotesize Traza real: \emph{«Who is the mother of the director of film Atomised (Film)?»}
+(oro: \emph{Atomised (film)}, \emph{Oskar Roehler}).
+\begin{columns}[T]
+\column{0.58\textwidth}
+\begin{tikzpicture}
+\begin{axis}[xbar, width=\textwidth, height=44mm, xmin=0, xmax=1.25,
+  symbolic y coords={{resto de pasajes (presa densa)},{ancla débil siguiente},{chunk: Oskar Roehler},{chunk: Atomised (film)},{can: oskar roehler},{can: atomised}},
+  ytick=data, xlabel={\tiny componente de $\mathbf v$ (sin normalizar)},
+  nodes near coords, every node near coord/.append style={font=\tiny},
+  tick label style={font=\tiny}, label style={font=\tiny}, bar width=3.2mm]
+\addplot[fill=azul!45, draw=azul] coordinates {(0.02,{resto de pasajes (presa densa)}) (0.05,{ancla débil siguiente}) (0.530,{chunk: Oskar Roehler}) (0.575,{chunk: Atomised (film)}) (1.00,{can: oskar roehler}) (1.05,{can: atomised})};
+\end{axis}
+\end{tikzpicture}
+\column{0.40\textwidth}
+\footnotesize
+Composición de cada componente:
+\begin{itemize}\footnotesize
+\item \texttt{can:atomised} $=1{,}0$ (compuerta) $+\,0{,}05$ (ancla del enlazador);
+\item \texttt{can:oskar roehler} $=1{,}0$: entidad del hecho aprobado
+  ---\emph{descubierta}, no nombrada en la pregunta;
+\item los dos \emph{pasajes propios} reciben $0{,}5\cdot\mathbf v(\varepsilon)$
+  más su presa densa;
+\item el resto del corpus conserva un suelo denso ($0{,}05\cdot$ similitud).
+\end{itemize}
+Tras el paseo: $p^*(\text{Atomised})=0{,}0084$,
+$p^*(\text{Roehler})=0{,}0063$, primer distractor $0{,}0004$
+(un orden de magnitud): $\mathrm{FC@}2=1$.
+\end{columns}
+\end{frame}
+
+\begin{frame}{El algoritmo de consulta, paso a paso sobre el grafo}
+\begin{columns}[T]
+\column{0.52\textwidth}
+\footnotesize
+\begin{enumerate}\footnotesize
+\item $v_0=e(q)$; afinidad $\sigma_a=\langle v_0,e(\tau_a)\rangle$ para las
+  $47\,999$ aserciones (un producto matricial).
+\item Enlazador: menciones $\to$ diccionario $\to$ $L(q)\subseteq\mathcal E$.
+\item \textbf{Analista} sobre $\mathrm{Top}_{40}\{\sigma\}\cup$ frontera de
+  $L(q)$: plan, selección $S(q)$, huecos.
+\item Siembra de $\mathbf v$ \emph{sobre nodos del grafo}: entidades de
+  $S(q)$ a peso $1$; $+0{,}5$ a sus pasajes propios; suelo denso en todo
+  pasaje; anclas $\epsilon$.
+\item Modulación: $\tilde A=A\,\mathrm{diag}(\mu)$,
+  $P=D^{-1}\tilde A$ (renormalización por filas).
+\item Paseo: $\mathbf p^{(t+1)}=\lambda(P^{\top}\mathbf p^{(t)}+m_{\text{colg}}\mathbf v)+(1-\lambda)\mathbf v$
+  hasta $\lVert\Delta\mathbf p\rVert_1<10^{-9}$.
+\item Si quedan huecos: \textbf{salto dirigido} (hechos del pasaje propio de
+  la entidad del hueco $\cup$ coseno del hueco) $\to$ re-siembra $\to$ una
+  re-iteración del paseo.
+\item Restricción de $\mathbf p^*$ a pasajes; \textbf{conjunto final} de 5
+  que cubre el plan.
+\end{enumerate}
+\column{0.46\textwidth}
+\centering
+\begin{tikzpicture}[node distance=2.2mm and 4mm, font=\tiny]
+  \node[dato] (q) {$q$};
+  \node[ent, below left=4mm and 1mm of q, fill=verde!12] (e1) {$\varepsilon_1$\\ \tiny$\mathbf v{=}1$ \textcircled{\tiny 4}};
+  \node[ent, below right=4mm and 1mm of q, fill=verde!12] (e2) {$\varepsilon_2$\\ \tiny$\mathbf v{=}1$ \textcircled{\tiny 4}};
+  \node[aser, below=5mm of q, text width=17mm] (aa) {hecho $a\in S(q)$\\ $\mu{=}1$ \textcircled{\tiny 5}};
+  \node[chk, below left=4mm and 0mm of aa, text width=16mm] (c1) {$\pi(\varepsilon_1)$\\ \tiny$+0{,}5$ \textcircled{\tiny 4}};
+  \node[chk, below right=4mm and 0mm of aa, text width=16mm] (c2) {$\pi(\varepsilon_2)$\\ \tiny$+0{,}5$ \textcircled{\tiny 4}};
+  \node[chk, right=9mm of c2, densely dotted, text width=13mm] (cx) {resto\\ \tiny$0{,}05\cos$ \textcircled{\tiny 4}};
+  \draw[fl, grisf] (q) -- node[et, left]{\textcircled{\tiny 1}\textcircled{\tiny 2}\textcircled{\tiny 3}} (aa);
+  \draw[fl] (e1) -- (aa); \draw[fl] (e2) -- (aa);
+  \draw[fl] (aa) -- (c1); \draw[fl] (aa) -- (c2);
+  \draw[flok, very thick] (e1) to[out=-100,in=170] node[et, left]{\textcircled{\tiny 6} paseo} (c1);
+  \draw[flmal, dashed] (e2) to[out=-30,in=90] node[et, right]{\textcircled{\tiny 7} salto} (cx);
+  \node[et, below=2mm of c2, text width=48mm, align=center]
+   {\textcircled{\tiny 8} $\mathbf p^*$ restringido a pasajes\\ $\to$ conjunto que cubre el plan};
+\end{tikzpicture}
+\end{columns}
+\end{frame}
+
 \begin{frame}{Protocolo experimental: paridad estricta y separación de datos}
 \begin{columns}[T]
 \column{0.52\textwidth}
@@ -392,6 +507,52 @@ CatRAG (publicado; código no liberado) & --- & $87{,}0$ & $67{,}6$ & ---\\
 (gana 326 / pierde 7); todos los tipos significativos. El artículo de \hippo{}
 con NV-Embed-v2 (7\,B, GPU) reporta $\mathrm{R@}5=90{,}4$: aquí $98{,}9$ con
 modelos de una fracción de ese coste.
+\end{frame}
+
+
+\begin{frame}{Estudio de caso: la misma consulta ante los tres sistemas}
+\footnotesize
+\emph{«Which film has the director who is older, God's Gift to Women or Aldri annet enn br\aa k?»}
+--- oro: los dos filmes y sus directores (\textbf{Michael Curtiz}, \textbf{Edith Carlmar}).
+\vspace{1mm}
+\begin{columns}[T]
+\column{0.34\textwidth}
+\centering \textbf{\hippo{} (medido)}\\[0.5mm]
+{\scriptsize
+1. \bien{Aldri annet enn br\aa k}\\
+2. \bien{God's Gift to Women}\\
+3. \bien{Edith Carlmar}\\
+4. \mal{Altid ballade}\\
+5. \mal{Bedre enn sitt rykte}\\[0.5mm]
+$\mathrm{R@}5=0{,}75$; $\mathrm{FC@}5=\mal{0}$}\\[0.5mm]
+\scriptsize\emph{Deriva a una sola rama}: los
+puestos 4--5 son \emph{otras películas de Carlmar}; Curtiz no se siembra
+nunca.
+\column{0.32\textwidth}
+\centering \textbf{CatRAG (mecanismo)}\\[0.5mm]
+\scriptsize Re-pondera las aristas del \emph{mismo} grafo de tripletes ante la
+consulta (código no liberado). No puede crear la semilla ausente ni resolver
+la identidad de menciones: hereda las islas y el presupuesto fijo por
+consulta. En 2Wiki publica $\mathrm{FCR}=67{,}6$
+($+1{,}5$ sobre su base): la re-ponderación \emph{sola} apenas repara la
+cadena.
+\column{0.34\textwidth}
+\centering \textbf{\sys{} v4 (medido)}\\[0.5mm]
+{\scriptsize
+1. \bien{God's Gift to Women}\\
+2. \bien{Michael Curtiz}\\
+3. \bien{Aldri annet enn br\aa k}\\
+4. \bien{Edith Carlmar}\\
+5. Altid ballade\\[0.5mm]
+$\mathrm{R@}5=1$; $\mathrm{FC@}5=\bien{1}$}\\[0.5mm]
+\scriptsize El plan declara \emph{ambos} directores como huecos; la compuerta
+y el pasaje propio siembran a Curtiz \emph{y} a Carlmar: recursos por cadena,
+no por consulta.
+\end{columns}
+\vspace{1.5mm}
+\scriptsize El contraste ilustra la tesis: re-ponderar un grafo pobre
+(CatRAG) no sustituye a \emph{representar mejor} (aserciones canónicas) ni a
+\emph{planificar la evidencia} (asignación por hueco).
 \end{frame}
 
 \begin{frame}{El hallazgo central: acumulación frente a colapso con la profundidad}

@@ -594,44 +594,62 @@ $p^*(\text{Roehler})=0{,}0063$, primer distractor $0{,}0004$
 \end{columns}
 \end{frame}
 
-\begin{frame}{Arquitectura agéntica: deliberación acotada, control algorítmico}
+\begin{frame}{Arquitectura agéntica completa: de la pregunta a la respuesta}
 \begin{columns}[T]
-\column{0.5\textwidth}
-\footnotesize
-Tres \textbf{roles LLM} con contrato JSON estricto, orquestados por un flujo
-\emph{determinista} (no hay bucle libre de agente):
-\begin{itemize}\footnotesize
-\item \textbf{Analista} (siempre; 1 llamada): comprensión $+$ plan $+$
-  selección. Reglas duras: entidades no vistas $\Rightarrow[X]$; prohibido el
-  conocimiento paramétrico; tope $=$ n.º de huecos.
-\item \textbf{Reparador} (condicional, $\sim$20\,\%): rellena huecos con
-  candidatos \emph{estructurales} ($\pi(\varepsilon)$) $+$ coseno del hueco.
-\item \textbf{Empaquetador} (salvo comparación): conjunto de 5 que cubre el
-  plan; guarda conservadora (el top-2 del paseo se preserva).
+\column{0.44\textwidth}
+\scriptsize
+\textbf{Censo de papeles LLM del sistema}, por fase y cadencia:
+\begin{itemize}\scriptsize
+\item \textbf{Indexación} (una vez por corpus, fuera de línea):
+  \emph{extractor} ($c\mapsto E_c,A_c$) y \emph{adjudicador de identidad}
+  (¿misma entidad? sobre pares ambiguos del diccionario).
+\item \textbf{Recuperación} (por consulta, lo evaluado):
+  \emph{analista} (plan $+$ selección; siempre),
+  \emph{reparador} (huecos; $\sim$20\,\%),
+  \emph{empaquetador} (conjunto de 5; salvo comparación).
+\item \textbf{Respuesta} (por consulta):
+  \emph{lector} (compone la respuesta desde el top-5, con citas) y, en el
+  caso clínico, \emph{verificador} (deóntica, umbrales numéricos, vigencia).
+  En los benchmarks: evaluación EM/F1$+$JSR planificada.
 \end{itemize}
-\textbf{Guardarraíles}: presupuesto $\le 3$ llamadas; degradación suave a
-denso si nada se aprueba; salidas validadas (JSON, índices en rango); caché
-por (modelo, consigna) $\Rightarrow$ determinismo y re-ejecución a coste
-cero. \emph{El LLM decide dentro de contratos; el algoritmo conserva el
-control} --- a diferencia de los agentes iterativos (IRCoT), la latencia y el
-coste están acotados por diseño.
-\column{0.48\textwidth}
+\textbf{Guardarraíles comunes}: contratos JSON validados; presupuesto
+$\le 3$ llamadas en recuperación; degradación suave a denso; caché por
+(modelo, consigna); los roles \emph{leen} las herramientas, nunca las
+escriben ---la memoria solo cambia en indexación. \emph{El LLM decide
+dentro de contratos; el algoritmo conserva el control} (sin bucle libre
+tipo IRCoT: latencia y coste acotados por diseño).
+\column{0.54\textwidth}
 \centering
 \begin{tikzpicture}[x=1mm, y=1mm, font=\tiny]
-  \node[caja, text width=30mm, minimum height=8mm] (orq) at (30,40) {\textbf{orquestador}\\ (flujo determinista)};
-  \node[caja, fill=teja!12, draw=teja, text width=20mm] (r1) at (6,26)  {\textbf{analista}\\ plan $+$ $S(q)$};
-  \node[caja, fill=teja!12, draw=teja, text width=20mm] (r2) at (30,26) {\textbf{reparador}\\ huecos};
-  \node[caja, fill=teja!12, draw=teja, text width=20mm] (r3) at (54,26) {\textbf{empaquetador}\\ conjunto de 5};
-  \node[dato, text width=17mm] (h1) at (6,12)  {diccionario\\ $\mathcal E$, $\pi(\varepsilon)$};
-  \node[dato, text width=15mm] (h2) at (28,12) {grafo $G$\\ $+$ PPR};
-  \node[dato, text width=17mm] (h3) at (52,12) {vectores\\ $\sigma_a$, $e(c)$};
-  \draw[fl] (orq) -- (r1); \draw[fl] (orq) -- (r2); \draw[fl] (orq) -- (r3);
-  \draw[fl, grisf] (r1) -- (h1); \draw[fl, grisf] (r1) -- (h3);
-  \draw[fl, grisf] (r2) -- (h1); \draw[fl, grisf] (r2) -- (h3);
-  \draw[fl, grisf] (r3) -- (h2);
-  \node[et, text width=62mm] at (30,2)
-    {los roles consultan las \emph{herramientas} (diccionario, grafo, vectores);\\
-     nunca escriben en ellas: la memoria solo cambia en indexación};
+  % fase 1: indexacion (offline)
+  \node[caja, fill=grisf!12, draw=grisf, text width=24mm] (x1) at (14,52) {\textbf{extractor}\\ aserciones $\tau_a$};
+  \node[caja, fill=grisf!12, draw=grisf, text width=24mm] (x2) at (46,52) {\textbf{adjudicador}\\ ¿misma entidad?};
+  % herramientas / memoria
+  \node[dato, text width=17mm] (h1) at (8,38)  {diccionario\\ $\mathcal E$, $\pi(\varepsilon)$};
+  \node[dato, text width=15mm] (h2) at (30,38) {grafo $G$\\ $+$ PPR};
+  \node[dato, text width=17mm] (h3) at (52,38) {vectores\\ $\sigma_a$, $e(c)$};
+  \draw[fl, grisf] (x1) -- (h1); \draw[fl, grisf] (x1) -- (h3); \draw[fl, grisf] (x2) -- (h1);
+  % fase 2: recuperacion
+  \node[caja, fill=teja!12, draw=teja, text width=19mm] (r1) at (6,24)  {\textbf{analista}};
+  \node[caja, fill=teja!12, draw=teja, text width=19mm] (r2) at (30,24) {\textbf{reparador}};
+  \node[caja, fill=teja!12, draw=teja, text width=19mm] (r3) at (54,24) {\textbf{empaquetador}};
+  \draw[fl] (h1) -- (r1); \draw[fl] (h3) -- (r1);
+  \draw[fl] (h1) -- (r2); \draw[fl] (h3) -- (r2);
+  \draw[fl] (h2) -- (r3);
+  % fase 3: respuesta
+  \node[caja, fill=verde!12, draw=verde, text width=22mm] (l1) at (16,10) {\textbf{lector}\\ respuesta $+$ citas};
+  \node[caja, fill=verde!12, draw=verde, densely dashed, text width=24mm] (l2) at (46,10) {\textbf{verificador} (clínico)\\ deóntica, dosis, vigencia};
+  \draw[fl] (r3) -- (l1); \draw[fl] (l1) -- (l2);
+  \node[et] at (60,2) {abstención si\\ hueco sin cubrir};
+  \draw[flmal, dashed] (r1.south west) to[out=-120,in=170] (l2.west);
+  \begin{scope}[on background layer]
+    \node[fit=(x1)(x2), draw=grisf, rounded corners=3pt, inner sep=2pt,
+      label={[et]left:{\textbf{indexación}\\ (una vez)}}] {};
+    \node[fit=(r1)(r3), draw=teja!60, rounded corners=3pt, inner sep=2pt,
+      label={[et]left:{\textbf{recuperación}\\ (evaluada)}}] {};
+    \node[fit=(l1)(l2), draw=verde!60, rounded corners=3pt, inner sep=2pt,
+      label={[et]left:{\textbf{respuesta}}}] {};
+  \end{scope}
 \end{tikzpicture}
 \end{columns}
 \end{frame}

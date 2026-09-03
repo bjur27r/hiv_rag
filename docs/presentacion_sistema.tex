@@ -754,45 +754,64 @@ modelos de una fracción de ese coste.
 \end{frame}
 
 
-\begin{frame}{Estudio de caso: tres mecanismos de recuperación ante la misma consulta}
+\begin{frame}{Estudio de caso: tres mecanismos, alineados etapa a etapa}
 \centering\scriptsize
 \emph{«Which film has the director who is older, God's Gift to Women or Aldri annet enn br\aa k?»}
---- oro: 2 filmes $+$ sus directores (\textbf{M. Curtiz}, \textbf{E. Carlmar}).
+--- oro: 2 filmes $+$ sus directores (\textbf{M. Curtiz}, \textbf{E. Carlmar}).\quad
+\colorbox{grisf!15}{\tiny heredado de \hippo{} sin cambios}\ \
+\colorbox{teja!15}{\tiny lo que cada sistema cambia}
 \vspace{1mm}
-\begin{columns}[T]
-\column{0.33\textwidth}\centering
-\textbf{\hippo{} (medido)}\\[0.8mm]
-\begin{tikzpicture}[x=1mm, y=1mm, font=\tiny, node distance=1.6mm]
-  \node[caja, text width=40mm] (h1) {\textbf{siembra} $=$ frases de los triples filtrados:\\ \{Aldri\dots, God's Gift\dots, \bien{E. Carlmar}\}};
-  \node[caja, below=of h1, text width=40mm] (h2) {\textbf{paseo con $T$ estática}: la masa difunde por el vecindario más denso --- las \emph{otras películas} de Carlmar};
-  \node[caja, below=of h2, text width=40mm, fill=teja!18, draw=teja] (h3) {\mal{Curtiz no se siembra nunca}: el filtro ($\le 4$ triples) cubrió una sola rama y $T$ no depende de $q$};
-  \node[dato, below=of h3, text width=40mm] (h4) {top-5: 3 oros $+$ 2 filmes de Carlmar\\ $\mathrm{R@}5{=}0{,}75$; $\mathrm{FC@}5{=}\mal{0}$};
-  \draw[fl] (h1) -- (h2); \draw[fl] (h2) -- (h3); \draw[fl] (h3) -- (h4);
-\end{tikzpicture}
-\column{0.30\textwidth}\centering
-\textbf{CatRAG (su mecanismo)}\\[0.8mm]
-\begin{tikzpicture}[x=1mm, y=1mm, font=\tiny, node distance=1.6mm]
-  \node[caja, text width=37mm] (c1) {\textbf{misma siembra} y \textbf{mismo grafo} de tripletes que \hippo{}};
-  \node[caja, below=of c1, text width=37mm] (c2) {re-pondera las aristas próximas a las semillas según $q$ (anclas $\epsilon$, pesos por LLM)};
-  \node[caja, below=of c2, text width=37mm, fill=teja!18, draw=teja] (c3) {\mal{no puede crear la semilla ausente} ni fusionar identidades: hereda el modo de fallo};
-  \node[dato, below=of c3, text width=37mm] (c4) {publicado (2Wiki, mismo backbone):\\ $\mathrm{FCR}=67{,}6$ ($+1{,}5$ sobre su base)};
-  \draw[fl] (c1) -- (c2); \draw[fl] (c2) -- (c3); \draw[fl] (c3) -- (c4);
-\end{tikzpicture}
-\column{0.33\textwidth}\centering
-\textbf{\sys{} (medido)}\\[0.8mm]
-\begin{tikzpicture}[x=1mm, y=1mm, font=\tiny, node distance=1.6mm]
-  \node[caja, fill=teja!12, draw=teja, text width=40mm] (n1) {\textbf{plan}: director de $A\to[X]$; director de $B\to[X]$; fechas de ambos $\Rightarrow$ aprueba \emph{los dos} hechos \textsc{directed}};
-  \node[caja, below=of n1, text width=40mm] (n2) {\textbf{compuerta}: $\mathbf v{=}1$ en \texttt{can:curtiz} y \texttt{can:carlmar}; $+0{,}5$ a \emph{sus pasajes propios}};
-  \node[caja, below=of n2, text width=40mm] (n3) {paseo con $\mu{=}1$ en ambos hechos; el \textbf{conjunto} exige cubrir los 4 huecos};
-  \node[dato, below=of n3, text width=40mm, fill=verde!8] (n4) {top-4 $=$ los 4 oros\\ $\mathrm{R@}5{=}1$; $\mathrm{FC@}5{=}\bien{1}$};
-  \draw[fl] (n1) -- (n2); \draw[fl] (n2) -- (n3); \draw[fl] (n3) -- (n4);
-\end{tikzpicture}
-\end{columns}
+
+\resizebox{0.99\textwidth}{!}{%
+\begin{tikzpicture}[x=1mm, y=1mm, font=\tiny]
+  % etiquetas de etapa (izquierda)
+  \node[et, align=right, anchor=east] at (-2,42) {\textbf{ÍNDICE}\\ (grafo)};
+  \node[et, align=right, anchor=east] at (-2,29) {\textbf{SIEMBRA}\\ $\mathbf v$};
+  \node[et, align=right, anchor=east] at (-2,16) {\textbf{PASEO}\\ $+$ decisión};
+  \node[et, align=right, anchor=east] at (-2,4)  {\textbf{RESULTADO}};
+  % cabeceras
+  \node[et] at (22,50)  {\textbf{\hippo{} (medido)}};
+  \node[et] at (70,50)  {\textbf{CatRAG (su artículo)}};
+  \node[et] at (118,50) {\textbf{\sys{} (medido)}};
+  % ---------------- fila INDICE
+  \node[caja, fill=teja!15, draw=teja, text width=42mm] (i1) at (22,42)
+    {tripletes como \emph{aristas}; menciones \mal{sin resolver} $+$ $172$k aristas de sinonimia};
+  \node[caja, fill=grisf!15, draw=grisf, text width=42mm] (i2) at (70,42)
+    {\textbf{el mismo grafo} de tripletes\\ (no cambia nada en indexación)};
+  \node[caja, fill=teja!15, draw=teja, text width=42mm] (i3) at (118,42)
+    {\bien{distinto}: aserciones-\emph{nodo} ($\tau_a$, roles $n$-arios) sobre entidades \textbf{canónicas}; sin sinonimia};
+  % ---------------- fila SIEMBRA
+  \node[caja, fill=teja!15, draw=teja, text width=42mm] (s1) at (22,29)
+    {frases de los $\le 4$ triples filtrados: cubrió \emph{una rama}\\ (Carlmar sí, \mal{Curtiz no})};
+  \node[caja, fill=grisf!15, draw=grisf, text width=42mm] (s2) at (70,29)
+    {\textbf{la misma siembra} $+$ anclas débiles $\epsilon$:\\ \mal{no puede crear la semilla ausente} (Curtiz sigue fuera)};
+  \node[caja, fill=teja!15, draw=teja, text width=42mm] (s3) at (118,29)
+    {\bien{distinta}: el \textbf{plan} declara ambos directores $\Rightarrow$ compuerta $\mathbf v{=}1$ en \emph{los dos} $+$ $0{,}5$ a sus pasajes propios};
+  % ---------------- fila PASEO
+  \node[caja, fill=teja!15, draw=teja, text width=42mm] (p1) at (22,16)
+    {$T$ \emph{estática}: la masa difunde al vecindario denso (otras películas de Carlmar)};
+  \node[caja, fill=teja!15, draw=teja, text width=42mm] (p2) at (70,16)
+    {\textbf{su única novedad}: re-pondera aristas \emph{cercanas a las semillas} según $q$ --- pero Curtiz no está cerca de ninguna semilla};
+  \node[caja, fill=teja!15, draw=teja, text width=42mm] (p3) at (118,16)
+    {\bien{distinto}: $\mu_a(q)$ sobre \emph{todos} los hechos ($\mu{=}1$ los aprobados) $+$ salto por huecos $+$ \textbf{conjunto} que cubre el plan};
+  % ---------------- fila RESULTADO
+  \node[dato, text width=42mm] (r1) at (22,4)
+    {top-5: 3 oros $+$ 2 filmes de Carlmar\\ $\mathrm{R@}5{=}0{,}75$; $\mathrm{FC@}5{=}\mal{0}$};
+  \node[dato, text width=42mm] (r2) at (70,4)
+    {publicado (mismo backbone):\\ $\mathrm{FCR}=67{,}6$ ($+1{,}5$ sobre su base)};
+  \node[dato, fill=verde!8, text width=42mm] (r3) at (118,4)
+    {top-4 $=$ los 4 oros\\ $\mathrm{R@}5{=}1$; $\mathrm{FC@}5{=}\bien{1}$};
+  \draw[fl] (i1) -- (s1); \draw[fl] (s1) -- (p1); \draw[fl] (p1) -- (r1);
+  \draw[fl] (i2) -- (s2); \draw[fl] (s2) -- (p2); \draw[fl] (p2) -- (r2);
+  \draw[fl] (i3) -- (s3); \draw[fl] (s3) -- (p3); \draw[fl] (p3) -- (r3);
+\end{tikzpicture}}
+
 \vspace{1mm}
-\scriptsize La diferencia es de \emph{mecanismo}, no de grado: los recursos de
-\hippo{}/CatRAG se fijan \textbf{por consulta} (una siembra, un grafo, una
-$T$); los nuestros se asignan \textbf{por hueco del plan} --- por eso la
-segunda cadena existe para el sistema antes de empezar a caminar.
+\scriptsize Lectura por columnas: CatRAG solo cambia \emph{una} etapa (re-ponderar
+el paseo) y hereda índice y siembra --- por eso su mejora es marginal
+($+1{,}5$): re-ponderar no alcanza a una semilla que no existe. \sys{} cambia
+\emph{las cuatro}: representación, identidad, siembra por plan y decisión de
+conjunto.
 \end{frame}
 
 \begin{frame}{El hallazgo central: acumulación frente a colapso con la profundidad}

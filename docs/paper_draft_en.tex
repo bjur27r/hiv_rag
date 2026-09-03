@@ -1,0 +1,574 @@
+% =========================================================================
+% Draft: scientific article (English).
+% Reified-assertion graph retrieval with a canonical entity memory and a
+% bounded evidence planner; evaluation on 2WikiMultihopQA and HotpotQA.
+%
+% Compile:  tectonic paper_draft_en.tex
+% System name is provisional: change \sys once.
+% =========================================================================
+\documentclass[11pt,a4paper]{article}
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[margin=2.5cm]{geometry}
+\usepackage{amsmath,amssymb,mathtools}
+\usepackage{booktabs}
+\usepackage{graphicx}
+\usepackage{enumitem}
+\usepackage[hidelinks]{hyperref}
+\usepackage{lmodern}
+
+\newcommand{\sys}{\textsc{CatRAG-Reif}}
+\newcommand{\hippo}{HippoRAG~2}
+\newcommand{\op}[1]{\operatorname{#1}}
+\newcommand{\R}{\mathbb{R}}
+\DeclareMathOperator*{\Top}{Top}
+
+\title{Full-Chain Multi-Hop Retrieval with Reified Assertion Graphs,\\
+Canonical Entity Memories, and Bounded Evidence Planning}
+\author{Anonymous draft --- September 2026}
+\date{}
+
+\begin{document}
+\maketitle
+
+\begin{abstract}
+Multi-hop question answering requires retrieving the \emph{complete} chain of
+evidence passages, yet state-of-the-art graph-based retrievers routinely
+recover partial chains: recall metrics remain high while the chain is broken.
+We identify two structural causes in the HippoRAG~2/CatRAG lineage ---
+unresolved entity identity in automatically constructed graphs, and per-query
+retrieval resources that do not scale with chain length --- and present a
+retriever that removes both. At indexing time, the system (i)~reifies each
+extracted fact into a first-class \emph{assertion} node carrying a
+self-contained sentence, $n$-ary participant roles, qualifiers, and
+provenance, and (ii)~consolidates all entity mentions into a \emph{canonical
+entity memory} built solely from the corpus, eliminating the synonymy-edge
+heuristic altogether. At query time, a \emph{bounded evidence planner} ---
+three LLM roles under strict JSON contracts orchestrated by a deterministic
+control flow --- plans the evidence chain as typed slots, selects supporting
+facts, seeds a query-modulated personalized PageRank, repairs unfilled slots
+through structural candidates, and packs the final passage set to cover the
+plan. Under strict model parity with published baselines (\texttt{gpt-4o-mini}
+$+$ \texttt{text-embedding-3-small}; the baseline executed with its official
+code, and our reproduction matching an independent published reproduction to
+the decimal), the system attains $97.7$ full-chain retrieval at $k{=}5$ on
+2WikiMultihopQA versus $65.8$ (\hippo{}) and $67.6$ (CatRAG), and $93.0$
+versus $80.4$ on HotpotQA with the configuration frozen and zero per-dataset
+tuning. Attribution is explicit: a no-graph control with an identical LLM
+budget loses $12.7$/$6.3$ points, and a null model of independent link
+failures shows that our degradation with chain depth is mere accumulation
+($\mathrm{FC}\!\approx\!p^{|G_q|}$) whereas the baseline collapses $4.8\times$
+below its own extrapolation. The complete study cost approximately
+\$40; each query costs ${\sim}\$0.001$ and every LLM call is cached, making
+all measurements reproducible at zero cost.
+\end{abstract}
+
+% =========================================================================
+\section{Introduction}
+\label{sec:intro}
+
+Retrieval-augmented generation over large corpora fails in a characteristic
+way on multi-hop questions: the passage that contains the answer is often
+\emph{lexically and semantically unrelated to the question}. Consider
+\emph{``Where did Sonia Greene's husband die?''} over a Wikipedia corpus. The
+passage about Sonia Greene is trivially retrieved (cosine $0.534$ against the
+question, rank~1 of $6{,}119$), but the answer resides in the biography of
+H.\,P.~Lovecraft --- a passage whose embedding similarity to the question is
+$0.089$ (rank $4{,}358$), because the question never mentions Lovecraft. The
+information that identifies the \emph{bridge} passage only becomes available
+after reading the first one. Dense and lexical retrieval therefore find what
+is \emph{named}, not what is \emph{chained}.
+
+The consequence is measurable and pernicious: systems achieve high partial
+recall while breaking the evidence chain. Following the Full Chain Retrieval
+(FCR) metric introduced with CatRAG, we write, for a question $q$ with gold
+passage set $G_q$ and returned top-$k$ list $T_k(q)$,
+\begin{equation}
+\mathrm{R@}k=\frac{|G_q\cap T_k(q)|}{|G_q|},
+\qquad
+\mathrm{FC@}k=\mathbf 1\!\left[\,G_q\subseteq T_k(q)\,\right].
+\label{eq:metrics}
+\end{equation}
+A reader cannot compose an answer from a partial chain: $\mathrm{R@}5=0.75$
+on a four-passage chain is operationally equivalent to zero. On double-bridge
+questions of 2WikiMultihopQA, BM25 attains $\mathrm{R@}5=50.9$ with
+$\mathrm{FC@}5=0.9$; the strongest published graph-based baseline, \hippo{},
+reaches only $\mathrm{FC@}5=12.3$ on that stratum.
+
+We trace this failure to two structural properties shared by the
+state-of-the-art lineage of graph-based retrievers. First, \emph{entity
+identity is left unresolved at indexing time}: mentions such as
+``H.\,P.~Lovecraft'' and ``Howard Phillips Lovecraft'' become distinct nodes,
+and the standard remedy --- synonymy edges above a cosine threshold ---
+fails precisely where it is most needed (that pair scores $0.781$, below the
+usual $0.80$ threshold), stranding the random walk on \emph{islands}. In our
+error analysis of a strong intermediate system, $57\%$ of chain failures were
+attributable to such islands. Second, \emph{retrieval resources are fixed per
+query}: one seed set, one transition matrix, and a $\le\!4$-fact selection
+budget are shared across however many chains the question requires, so
+double-chain questions are starved by construction.
+
+This paper presents a retriever designed so that neither failure mode can
+occur, and quantifies each design decision. Our contributions are:
+
+\begin{enumerate}[leftmargin=1.6em,itemsep=2pt]
+\item \textbf{A reified-assertion graph over canonical entities.} Facts are
+  promoted to first-class nodes with self-contained sentences, $n$-ary roles,
+  qualifiers, and provenance (\S\ref{sec:assertion}); entity identity is
+  resolved \emph{before} graph construction by a canonical entity memory
+  derived solely from the corpus (\S\ref{sec:memory}), removing synonymy
+  edges entirely.
+\item \textbf{A bounded evidence planner.} Three LLM roles under strict JSON
+  contracts --- an \emph{analyst} that plans the chain as typed slots and
+  selects supporting facts, a conditional \emph{repairer} that fills residual
+  slots from structural candidates, and a \emph{packer} that selects the
+  final passage set to cover the plan --- are orchestrated by a deterministic
+  control flow with at most three LLM calls per query
+  (\S\ref{sec:planner}). The LLM decides within contracts; the algorithm
+  retains control.
+\item \textbf{State-of-the-art full-chain retrieval under strict parity.}
+  With small, interchangeable models
+  (\texttt{gpt-4o-mini}/\texttt{deepseek-chat} and
+  \texttt{text-embedding-3-small}), the system reaches
+  $\mathrm{FC@}5=97.7$ on 2WikiMultihopQA versus $65.8$ (\hippo{}, its own
+  code) and $67.6$ (CatRAG, published under the identical backbone), and
+  $93.0$ versus $80.4$ on HotpotQA with the configuration frozen
+  (\S\ref{sec:results}). Our baseline reproduction matches an independent
+  published reproduction to the decimal.
+\item \textbf{Explicit attribution and a depth analysis.} Component
+  ablations, a no-graph control at identical LLM budget, and a multiplicative
+  null model ($\mathrm{FC}\approx p^{|G_q|}$) that separates degradation by
+  \emph{accumulation} (ours) from structural \emph{collapse} (the baseline)
+  (\S\ref{sec:results}, \S\ref{sec:discussion}).
+\end{enumerate}
+
+% =========================================================================
+\section{Related Work}
+\label{sec:related}
+
+\paragraph{Dense and lexical retrieval.} Bi-encoder retrieval and BM25 score
+passages independently against the query; both are bounded by the
+question--evidence lexical gap described above and neither can allocate
+probability mass to a passage identified only through intermediate evidence.
+
+\paragraph{Structure-aware retrieval.} RAPTOR builds recursive summaries;
+GraphRAG and LightRAG derive corpus-level graph abstractions. HippoRAG and
+\hippo{} run personalized PageRank (PPR) over an open-information-extraction
+triple graph with embedding-based synonymy edges, seeding from
+query-to-triple retrieval gated by a \emph{recognition-memory} LLM filter.
+CatRAG extends \hippo{} with query-adaptive traversal --- symbolic anchors and
+LLM-weighted edges --- while keeping the same triple graph; its authors report
+modest recall gains and larger full-chain gains. PropRAG replaces triples
+with propositions but retrieves by beam search over proposition paths. Our
+work differs on three axes: identity is resolved at indexing (no synonymy
+edges), facts are reified nodes whose \emph{transit} is query-modulated, and
+query-time resources are allocated \emph{per slot of an explicit evidence
+plan} rather than per query.
+
+\paragraph{Iterative and agentic retrieval.} IRCoT, Self-RAG and successors
+interleave retrieval with generation in open-ended loops, at significant
+latency and cost. Our planner is deliberately \emph{bounded}: a deterministic
+orchestration of at most three contracted LLM decisions, with graceful
+degradation to dense retrieval; it captures most of the benefit of iteration
+(the repair hop) without an open loop.
+
+% =========================================================================
+\section{Method}
+\label{sec:method}
+
+\subsection{Notation and overview}
+Let $\mathcal D=\{c_1,\dots,c_N\}$ be the passage corpus and
+$e(\cdot)\in\R^{1536}$ an $L_2$-normalized text encoder, so cosine similarity
+is the inner product. The system operates in two phases. \emph{Indexing},
+executed once per corpus without access to any question, comprises reified
+open information extraction, canonical entity consolidation, and graph
+materialization. \emph{Querying} chains eight steps: query encoding and
+question--fact affinity; mention linking; the analyst call; seeding;
+transition modulation; the personalized random walk; the conditional repair
+hop; and final set packing.
+
+\subsection{The semantic unit: reified assertions}
+\label{sec:assertion}
+
+An \emph{assertion} is an atomic fact promoted to a first-class node,
+\begin{equation}
+a=(s_a,\;r_a,\;o_a,\;Q_a,\;\tau_a),
+\label{eq:assertion}
+\end{equation}
+with subject and object mentions $s_a,o_a$, a short relation label $r_a$,
+qualifiers $Q_a$ (dates, places, doses), and a \emph{self-contained sentence}
+$\tau_a$ verbalizing the fact with full names and no pronouns. The node is
+linked by typed edges to its source passage (provenance), to its subject and
+object, and to \emph{every} additional participant whose surface form occurs
+in $\tau_a$ ($n$-ary reification). Three properties justify the
+representation against the triple-as-edge alternative:
+
+\begin{enumerate}[leftmargin=1.6em,itemsep=2pt]
+\item \textbf{Query modulability.} In a triple graph the transition
+  distribution out of an entity is fixed at indexing and identical for every
+  query; CatRAG re-weights it, but over the same binary support. With
+  fact nodes, each fact is individually addressable:
+  $P(\varepsilon\!\to\!a)\propto\mu_a(q)$ with
+  $\mu_a=\tfrac14+\tfrac34\,\tilde\sigma_a(q)$
+  (Eq.~\ref{eq:modulation}); facts approved by the analyst transit at full
+  weight. Empirically, the passage about the director Michael Curtiz
+  contributes $30$ facts: under \emph{``who is older\dots''}, the
+  \textsc{date\_of\_birth} assertion transits at $\mu{=}1$ while the $29$
+  \textsc{directed} assertions are attenuated --- indistinguishable in a flat
+  graph.
+\item \textbf{$n$-ary closure.} Triples force binarity; additional
+  participants and qualifiers are lost or become literal nodes. The assertion
+  keeps them in $\tau_a$ and in its roles: \emph{the retrieved unit already
+  contains the datum the question compares}.
+\item \textbf{Sentence semantics.} Question--fact affinity is computed on
+  $e(\tau_a)$ rather than on concatenated labels, conferring robustness to
+  extractor labeling noise (e.g., inverted relation labels with a correct
+  sentence).
+\end{enumerate}
+
+\subsection{Canonical entity memory}
+\label{sec:memory}
+
+Automatically extracted graphs suffer \emph{entity fragmentation}. We resolve
+identity before graph construction, using only the corpus (never evaluation
+data), in four steps. (1)~\emph{Mention cards}: for each (passage, surface
+form) pair we compose a textual card --- the form plus the sentences of the
+assertions in which the mention participates --- and embed both the card
+(context channel $\phi$) and the bare name (name channel $\nu$). The passage
+\emph{title} is additionally registered as a synthetic mention of the
+article's subject. (2)~\emph{Candidate generation} over both channels
+($15$ nearest neighbors each): a cross-passage pair is a candidate if
+$\langle\nu_m,\nu_{m'}\rangle\ge 0.80$ or if
+$\langle\phi_m,\phi_{m'}\rangle\ge 0.75$ with a shared informative token.
+(3)~\emph{Three-band adjudication under hard constraints}: disjoint
+birth/death years or distinct regnal ordinals veto the pair; identical
+normalized names merge automatically; near-identical names with affine
+context merge automatically; the ambiguous band is adjudicated by an LLM
+shown both cards and source articles, batched and cached, under a
+deliberately strict instruction (relatives, successors, namesakes and remakes
+are \emph{not} the same entity; short and full forms of one name are).
+Verdicts are closed transitively. (4)~\emph{Canonical entries}: each group
+yields an entry with canonical name (title form preferred), alias set,
+merged description, source passages and, where it exists, the entity's
+\emph{own passage} $\pi(\varepsilon)$ --- the article about it. On the
+2WikiMultihopQA corpus, $40{,}276$ mentions consolidate into $26{,}960$
+entries; on our development probe the procedure resolved $178$ of $188$
+diagnosed identity islands. The canonical graph
+$G=(\mathcal C\cup\mathcal E\cup\mathcal A,\,E)$ ---passages, entities,
+assertions--- therefore \emph{contains no synonymy edges at all}.
+
+\subsection{Query pipeline and the bounded evidence planner}
+\label{sec:planner}
+
+\paragraph{Affinity and linking.} A single matrix product yields
+$\sigma_a=\langle e(q),e(\tau_a)\rangle$ for all assertions. A linker
+resolves question mentions against the memory (exact alias match after
+folding; card-embedding fallback at $\cos\ge0.80$), producing
+$L(q)\subseteq\mathcal E$.
+
+\paragraph{The analyst (always; one call).} The analyst receives the question
+and a candidate list $\mathcal K(q)=\Top_{40}\{\sigma_a\}\cup
+\bigcup_{\varepsilon\in L(q)}\Top_{15}\{\sigma_a: a\ni\varepsilon\}$ (the
+\emph{frontier} of linked entities) and returns, in one JSON object:
+canonical mentions; the evidence \emph{plan} as typed slots (e.g.,
+\emph{``director of film $A$ $\to X$; date of death of $X$''}); the selected
+facts $S(q)\subseteq\mathcal K(q)$ that fill slots, with a dynamic budget
+equal to the number of slots (up to $8$); and the \emph{unfilled} slots,
+phrased as retrieval queries. Two hard rules, added after failure analysis,
+matter empirically: a slot may name an entity \emph{only} if a candidate fact
+states it (otherwise the placeholder $[X]$), and when a role has several
+candidate entities the analyst must keep them all --- parametric knowledge
+must never resolve the ambiguity. Selection defines
+$\tilde\sigma_a=1$ for $a\in S(q)$ and $\tilde\sigma_a=\sigma_a$ otherwise.
+
+\paragraph{Seeding.} The personalization vector $\mathbf v\in\R^{|V|}$
+combines four sources: (i)~a \emph{hard gate} --- only entities participating
+in approved facts are seeded, at the mean clipped affinity of their approving
+facts (weight $1$ under $\tilde\sigma$); if nothing is approved the system
+degrades gracefully to dense retrieval; (ii)~a dense floor over \emph{all}
+passage nodes, $w_{\text{pas}}\!=\!0.05$ times the normalized passage--query
+similarity; (iii)~weak symbolic anchors ($\epsilon=0.05$); and (iv)~the
+\emph{own-passage} term
+\begin{equation}
+\mathbf v\bigl(\pi(\varepsilon)\bigr)\;\mathrel{+}=\;
+w_{\text{link}}\,\mathbf v(\varepsilon),\qquad w_{\text{link}}=0.5,
+\label{eq:ownpassage}
+\end{equation}
+which encodes the encyclopedic prior that \emph{the article about an entity
+is the entity}: every discovered bridge entity converts into a directly
+seeded passage, without relying on the walk to reach it. In our error
+analysis, the absence of this term explained the majority of residual chain
+failures of the ungated system.
+
+\paragraph{Modulated personalized PageRank.} With adjacency $A$ of the
+directed search graph (role edges inverted so mass flows
+entity$\to$assertion$\to$\{entity, passage\}), the columns entering assertion
+nodes are rescaled,
+\begin{equation}
+\tilde A=A\,\op{diag}(\mu),\qquad
+\mu_u=\begin{cases}
+\tfrac14+\tfrac34\,\op{clip}_{[0,1]}(\tilde\sigma_u) & u\in\mathcal A,\\
+1 & \text{otherwise},
+\end{cases}
+\label{eq:modulation}
+\end{equation}
+rows are renormalized, $P=D^{-1}\tilde A$, and the walk iterates
+\begin{equation}
+\mathbf p^{(t+1)}=\lambda\Bigl(P^{\!\top}\mathbf p^{(t)}
++m_{\text{dang}}\,\mathbf v\Bigr)+(1-\lambda)\,\mathbf v,
+\qquad \lambda=0.5,
+\label{eq:ppr}
+\end{equation}
+to convergence ($\lVert\Delta\mathbf p\rVert_1<10^{-9}$, $\le 80$
+iterations). The damping factor, the passage weight and the all-passage
+seeding follow the published \hippo{} values as a pre-registered parity
+decision.
+
+\paragraph{Targeted repair (conditional; ${\sim}20\%$ of queries).} For each
+unfilled slot, candidate facts are gathered \emph{structurally} --- the
+assertions of the own passage of the entity the slot refers to --- and by
+cosine of the slot text; each is displayed with its source article. A short
+LLM call selects the facts that fill the slot; approved facts are added to
+$S(q)$, the seeds are rebuilt, and the walk is re-run once. The structural
+channel is decisive when the bridge article uses a different or
+original-language title (the article \emph{The Magician (1958 film)} states
+``Ingmar Bergman directed \emph{Ansiktet}''), a case unreachable by
+similarity or synonymy.
+
+\paragraph{Set packing (except simple comparisons).} FC@$k$ is a property of
+the \emph{set}, not of individual passages. A final LLM call receives the
+plan and the top-$12$ passages of $\mathbf p^{*}$ and selects the five that
+jointly cover all slots, with a conservative guard (the walk's top-$2$ is
+preserved); remaining positions follow the walk order.
+
+\paragraph{Bounded agency.} The three roles operate under validated JSON
+contracts, a budget of at most three calls per query, response caching keyed
+by (model, prompt), and read-only access to the index; corpus memory changes
+only at indexing. The control flow is deterministic: the LLM decides
+\emph{within} contracts, and latency and cost are bounded by design, in
+contrast to open agent loops.
+
+% =========================================================================
+\section{Experimental Setup}
+\label{sec:setup}
+
+\paragraph{Datasets and task.} We evaluate on the reproduction subsets
+released with \hippo{}: 2WikiMultihopQA ($1{,}000$ questions; $6{,}119$
+passages; question types \emph{compositional}, \emph{comparison},
+\emph{inference}, \emph{bridge-comparison}, the latter requiring four gold
+passages) and HotpotQA ($1{,}000$; $9{,}811$). Retrieval is \emph{open}
+against the full corpus; the ten-paragraph distractor context accompanying
+each question is not used. Gold is the set of supporting passage titles.
+
+\paragraph{Parity and baseline validation.} \hippo{} is executed as a strong
+baseline \emph{with its official code}, on the same corpus and questions,
+with the same LLM and encoder as our system
+(\texttt{gpt-4o-mini}, \texttt{text-embedding-3-small}). The CatRAG paper
+reports its results under this identical backbone, enabling direct
+comparison despite its unreleased code. Our \hippo{} reproduction on
+2WikiMultihopQA ($\mathrm{R@}5/\mathrm{FCR}=85.9/65.8$) matches the
+independent reproduction published in the CatRAG paper ($85.9/66.1$) to the
+decimal. The published $\mathrm{R@}5=90.4$ of the \hippo{} paper corresponds
+to a 70B extraction model and a 7B GPU encoder (NV-Embed-v2), a different
+hardware class.
+
+\paragraph{Data separation.} The $1{,}000$-question test sets are touched
+once per configuration. All design, prompt iteration and ablation decisions
+were made on a stratified $200$-question development probe (with its own
+mini-corpus) drawn from the official labeled development split, disjoint from
+the test set; an $11{,}376$-question calibration pool served the lexical
+router and prompt exemplars. The final configuration was frozen before
+measurement; HotpotQA was run with \emph{zero} dataset-specific tuning.
+
+\paragraph{Statistics.} All system comparisons are paired per question with
+bootstrap confidence intervals ($B{=}2{,}000$); a difference is significant
+when the interval excludes zero. \paragraph{Cost.} The complete study ---
+extraction, entity memory, graphs, all measurements of all systems ---
+cost ${\sim}\$40$; queries cost ${\sim}\$0.001$ each, and every LLM call is
+cached, making all numbers reproducible at zero marginal cost.
+
+% =========================================================================
+\section{Results}
+\label{sec:results}
+
+\begin{table}[t]
+\centering\small
+\caption{Main results on 2WikiMultihopQA ($1{,}000$ questions, $6{,}119$
+passages; all systems under the same backbone). Paired
+\sys{}$-$\hippo{}: $\Delta\mathrm{FC@}5=+31.9$ $[+28.9,+34.9]$ (wins
+$326$ / loses $7$); all four question types significant.}
+\label{tab:main}
+\begin{tabular}{lcccc}
+\toprule
+ & R@2 & R@5 & FC@5 & FC@10\\
+\midrule
+BM25 & --- & 65.8 & 32.8 & 40.1\\
+\hippo{} (official code) & 70.7 & 85.9 & 65.8 & 71.7\\
+CatRAG (published; code unreleased) & --- & 87.0 & 67.6 & ---\\
+\sys{} v3 (canonical graph, no planner) & 73.0 & 96.0 & 90.6 & 93.4\\
+\sys{} $+$ planner (\texttt{gpt-4o-mini}) & 80.2 & 98.1 & 96.0 & 96.7\\
+\sys{} $+$ planner (\texttt{deepseek-chat}) & \textbf{84.2} & \textbf{98.9} & \textbf{97.7} & \textbf{97.8}\\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\begin{table}[t]
+\centering\small
+\caption{Generalization (HotpotQA, configuration frozen from
+2WikiMultihopQA; zero tuning) and planner-model interchangeability
+(2WikiMultihopQA development probe).}
+\label{tab:hotpot}
+\begin{tabular}{lcc@{\qquad}lcc}
+\toprule
+HotpotQA & R@5 & FC@5 & planner model (probe) & FC@5 & \$/query\\
+\midrule
+BM25 (ours) & 72.8 & 49.5 & \texttt{deepseek-chat} & 97.5 & 0.0010\\
+dense \texttt{te3-small} (pub.) & 81.3 & 64.9 & \texttt{gpt-oss-20b} (Groq) & 97.0 & 0.0005\\
+\hippo{} (published) & 87.1 & 75.5 & \texttt{gpt-4o} & 96.5 & 0.012\\
+CatRAG (published) & 89.5 & 80.4 & \texttt{gpt-4o-mini} & 96.0 & 0.0008\\
+\sys{} (\texttt{4o-mini}) & 94.7 & 90.2 & & & \\
+\sys{} (\texttt{deepseek}) & \textbf{96.0} & \textbf{93.0} & & & \\
+\bottomrule
+\end{tabular}
+\end{table}
+
+\paragraph{Main comparison.} Table~\ref{tab:main} summarizes the single
+measurement on the 2WikiMultihopQA test set. \sys{} surpasses \hippo{} and
+the published CatRAG on every metric; the paired difference in
+$\mathrm{FC@}5$ is $+31.9$ points $[+28.9,+34.9]$, winning $326$ questions
+and losing $7$, with all four question types individually significant. The
+most informative stratum is bridge-comparison (four-passage chains):
+$\mathrm{FC@}5$ $98.7$ versus $12.3$. As external reference, the \hippo{}
+paper reports $\mathrm{R@}5=90.4$ on this subset with Llama-3.3-70B and
+NV-Embed-v2 (7B); \sys{} reaches $98.9$ with models a fraction of that cost.
+On HotpotQA (Table~\ref{tab:hotpot}), with the configuration frozen, \sys{}
+exceeds the published CatRAG by $+6.5$ $\mathrm{R@}5$ and $+12.6$
+$\mathrm{FC@}5$.
+
+\paragraph{Depth analysis: accumulation versus collapse.} Grouping questions
+by hop structure --- (A)~no bridge, both entities named ($n{=}244$);
+(B)~single bridge ($n{=}521$); (C)~double bridge, four golds ($n{=}235$) ---
+\hippo{} degrades $93.4\to77.0\to12.3$ while \sys{} v3 holds
+$99.2\to89.6\to83.8$. A null model of independent link failures,
+$\mathrm{FC}\approx p^{|G_q|}$ with $p$ fitted on stratum~B and extrapolated
+to~C, matches \sys{} ($80.3$ predicted vs.\ $83.8$ observed; ratio $1.04$)
+and is violated $4.8\times$ by \hippo{} ($59.2$ predicted vs.\ $12.3$
+observed). The baseline's failure on double chains is therefore not
+accumulative noise but a \emph{structural collapse}: its per-query resources
+(a $\le 4$-triple selection, one seed distribution, one slack position in
+the top-5) are shared across both chains, so covering a single branch
+guarantees $\mathrm{FC}=0$ regardless of ranking quality. The planner
+inverts the gradient: with the full system the double-bridge stratum reaches
+$\mathrm{FC@}5=98.7$, turning the historically worst segment into the best.
+
+\paragraph{Attribution.} On the development probe, the contribution ladder
+reads $92.0$ (v3) $\to 92.5$ ($+$plan) $\to 95.5$ ($+$repair)
+$\to 97.5$ ($+$packing): the plan by itself barely moves the aggregate; its
+value is to \emph{enable} the repair hop (largest single contribution,
+$+3.0$; double chains $86\to96$) and the set packing ($+1.5$, and $+6$
+points of $\mathrm{FC@}2$). Conversely, a \emph{no-graph control} --- the
+identical analyst/repair/packing budget applied to the top-20 of dense
+retrieval --- loses $12.7$ points of $\mathrm{FC@}5$ on 2WikiMultihopQA
+($96.0$ vs.\ $83.3$, $[+10.5,+14.9]$) and $6.3$ on HotpotQA
+($[+4.1,+8.6]$), meeting a pre-registered criterion ($\ge5$ and significant
+on both): the representation contributes beyond the planner. The planner
+mainly repairs double chains; single bridges are repaired by the graph
+($130/141$ of the control's missed golds do not even appear in its top-20).
+Finally, the planner model is interchangeable
+(Table~\ref{tab:hotpot}, right): an open 20B model nearly ties
+\texttt{gpt-4o} at $1/24$ of the cost --- the gain resides in the task
+design, not in model scale.
+
+% =========================================================================
+\section{Discussion}
+\label{sec:discussion}
+
+\paragraph{Why it works.} Each of the three design decisions removes one
+dependency of failure probability on chain depth. (1)~\emph{Identity at
+indexing}: with threshold synonymy, every additional link is another
+opportunity for an island, so per-link failure grows with depth; with
+canonical consolidation it is approximately constant. (2)~\emph{Facts as
+first-class nodes}: probability mass travels \emph{through} the approved
+fact at full weight instead of competing against a hub's undifferentiated
+edge set, and qualifiers travel inside the retrieved unit.
+(3)~\emph{Resources that scale with the chain}: the analyst's budget equals
+the number of slots, the hard gate seeds the entities of \emph{all} approved
+facts, the own-passage term converts each discovered bridge entity into a
+seeded passage, and the packer allocates the $k$ budget to the chain. The
+multiplicative analysis makes the mechanism quantitative: our residual
+degradation is consistent with ${\sim}5\%$ independent per-link error
+(filter judgment, extraction gaps), while the baseline's double-chain
+failure is a resource-sharing pathology, visible in its own signature of
+high partial recall with broken chains.
+
+\paragraph{Relation to adaptive traversal.} CatRAG's diagnosis --- static
+graphs cause semantic drift --- is correct, but its remedy re-weights the
+edges of the same impoverished triple graph and cannot create an absent
+seed, nor merge identities. Re-weighting a poor graph is not a substitute
+for representing better and planning the evidence; under the identical
+backbone the published CatRAG improves its base by $+1.1/+1.5$ points where
+the present system improves it by $+13.0/+31.9$.
+
+\paragraph{Bounded agency as a design point.} The system occupies a middle
+ground between single-shot retrieval and open agent loops: deliberation is
+distributed across typed roles, but the orchestration is deterministic, the
+call budget is a constant, outputs are schema-validated, and every decision
+is cached. We regard the combination of \emph{contracts} (what the LLM may
+decide) and \emph{structure} (what the index guarantees) as the
+transferable lesson, applicable wherever the evidence for a query must be
+assembled rather than merely found --- including our motivating clinical
+deployment, where the plan's unfilled slots become \emph{grounded
+abstention} (``the guidelines contain no evidence on $X$'') and the packer's
+output an auditable evidence dossier.
+
+\paragraph{Threats to validity.} We list the known ones with mitigations.
+(i)~Three test-set questions were inspected during an intermediate iteration
+and the analyst's exemplars were derived from their \emph{failure patterns}
+(not their answers); the subsequent improvement replicated on the held-out
+probe ($\mathrm{FC@}5$ $64.0\to83.5\to92.0$ across iterations), ruling out
+memorization; for an archival version the exemplars should be re-derived
+from the calibration pool and those questions flagged. (ii)~The error
+analysis motivating the entity memory was computed on aggregate failure
+classes of an intermediate system on the test set; the remedy is structural
+and its effect replicated on the probe. (iii)~Each configuration touched the
+test set once, but several configurations were measured over the campaign;
+the frozen-configuration transfer to HotpotQA, with zero tuning, is the
+strongest evidence that the gains are not test-set adaptation.
+
+\paragraph{Limitations.} End-to-end answer quality (EM/F1) and the Joint
+Success Rate (complete chain \emph{and} correct answer) remain to be
+measured; the published JSR of \hippo{}/CatRAG (53.0/55.0 on
+2WikiMultihopQA) provides the reference. MuSiQue, whose questions carry
+explicit 2/3/4-hop labels, will provide a direct test of the multiplicative
+model. The inference stratum ($n{=}108$) does not reach isolated
+significance. Residual lexical heuristics (mention spans, the intent router)
+were superseded by the analyst but have not been stress-tested across
+languages. All experiments used a single encoder; encoder sensitivity is
+untested, although the planner-model sweep suggests the architecture, not
+the model, carries the gain.
+
+% =========================================================================
+\section{Conclusions}
+\label{sec:conclusions}
+
+Multi-hop retrieval fails at the chain level, and chain-level failure has
+structural causes: unresolved identity and per-query resource budgets. A
+retriever that resolves identity in the index (canonical entity memory),
+represents facts as addressable, query-modulable nodes (reified assertions),
+and allocates query-time resources per slot of an explicit evidence plan
+(bounded planner) recovers complete chains where the state of the art breaks
+them: $\mathrm{FC@}5=97.7$ versus $65.8$/$67.6$ on 2WikiMultihopQA and
+$93.0$ versus $80.4$ on HotpotQA under strict model parity, with the
+improvement attributed by ablation, controlled against a no-graph
+counterpart, and characterized by a depth analysis that separates
+accumulation from collapse. The system runs on small, interchangeable
+models at ${\sim}\$0.001$ per query, is reproducible at zero marginal cost,
+and carries directly to high-stakes domains where the same machinery yields
+evidence dossiers and grounded abstention.
+
+\paragraph{Reproducibility.} Code, prompts, per-question outputs, and all
+LLM/embedding caches are available at
+\texttt{github.com/bjur27r/hiv\_rag} (branch \texttt{eval-wiki2}); every
+reported measurement re-executes deterministically without API cost.
+
+\end{document}

@@ -845,3 +845,23 @@ sin grafo ya supera a CatRAG (80,4) y HippoRAG 2 (75,5): de los +9,8 de la v4
 sobre CatRAG, +3,5 son del planificador y +6,3 de la representación (2Wiki:
 +15,7 / +12,7). **Criterio pre-registrado (≥5 y SIG en ambos bancos): cumplido.**
 Memoria: `docs/control_sin_grafo.tex`.
+
+## Hoja de ruta (guardada 2026-09-05)
+
+Estado: v4 cerrada y medida (FC@5 bancos: 2Wiki 96,0/97,7; HotpotQA 90,2/93,0;
+control sin grafo 83,3/83,9 → representación +12,7/+6,3 SIG); presentación
+Beamer (30 diapositivas) y borrador del artículo en inglés
+(`docs/paper_draft_en.tex`) hechos; cuadernos didácticos de los tres grafos,
+GeSIDA y HotpotQA (secciones de navegación 1.5/1.6 insertadas sin ejecutar,
+sin commitear; ojo: en el comparativo `r4` carga el diccionario v3, la config
+curada es `Wiki2PlanRAG.v4()`).
+
+Próximos pasos, en orden: (1) MuSiQue — ids de pasaje únicos + pasaje propio
+como conjunto (647 títulos repetidos), train por descargar, sondeo, índice y
+medición (~$7); (2) lector QA EM/F1/JSR en los 3 conjuntos (~$3); (3)
+reproducir HippoRAG 2 en HotpotQA/MuSiQue (~$11, decisión); (4) varianza (3
+repeticiones por sondeo); (5) pulir el artículo en inglés. Barato e
+independiente: orden híbrido «aprobados primero» para R@2 (evidencia del
+control: +5,0 R@2 SIG). Producto: porte GeSIDA empezando por el paso 0
+(reranker inactivo en producción, eval≠producción, lente numérica, anti-hub).
+Comandos exactos en BITACORA_2026-08-30.md («Cómo retomar»).

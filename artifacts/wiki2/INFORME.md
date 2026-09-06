@@ -862,6 +862,9 @@ medición (~$7); (2) lector QA EM/F1/JSR en los 3 conjuntos (~$3); (3)
 reproducir HippoRAG 2 en HotpotQA/MuSiQue (~$11, decisión); (4) varianza (3
 repeticiones por sondeo); (5) pulir el artículo en inglés. Barato e
 independiente: orden híbrido «aprobados primero» para R@2 (evidencia del
-control: +5,0 R@2 SIG). Producto: porte GeSIDA empezando por el paso 0
+control: +5,0 R@2 SIG). Anotado 05-09: consigna del analista v2 (definir
+«hueco», la flecha `->` y `[X]` con especificación explícita, no solo por
+demostración; inconsistencia detectada por el usuario; re-validar en sondeo
+si se cambia — la actual se apoya en la capacidad del modelo: qwen se rompió). Producto: porte GeSIDA empezando por el paso 0
 (reranker inactivo en producción, eval≠producción, lente numérica, anti-hub).
 Comandos exactos en BITACORA_2026-08-30.md («Cómo retomar»).

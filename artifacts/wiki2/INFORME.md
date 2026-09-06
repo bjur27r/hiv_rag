@@ -875,3 +875,11 @@ tanda). El cuaderno comparativo suma la sección 1.6 «Anatomía de r4» y la
 celda que materializa K(q) (91 celdas, sin commitear). Producto: porte GeSIDA empezando por el paso 0
 (reranker inactivo en producción, eval≠producción, lente numérica, anti-hub).
 Comandos exactos en BITACORA_2026-08-30.md («Cómo retomar»).
+
+**06-09**: artículo en inglés rehecho (`docs/paper_draft_en.tex`: figuras TikZ de
+las dos representaciones y del grafo por capas, Proposición de forma cerrada
+verificada, función de adjudicación de la memoria + auditoría QID 74→32,
+ecuación de siembra, Algorithm 1, tabla de evolución 51,2→97,7, ablaciones
+HotpotQA y descomposición planificador/representación) y nueva presentación
+Beamer en inglés del artículo (`docs/presentacion_articulo_en.tex`, 30
+diapositivas, ~24 figuras). Sin cambios de cifras; commits en eval-wiki2.

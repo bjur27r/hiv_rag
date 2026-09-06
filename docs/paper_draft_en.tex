@@ -16,6 +16,19 @@
 \usepackage{enumitem}
 \usepackage[hidelinks]{hyperref}
 \usepackage{lmodern}
+\usepackage{tikz}
+\usetikzlibrary{arrows.meta,positioning,fit,backgrounds,calc,shapes.geometric}
+\definecolor{cblue}{RGB}{31,80,154}
+\definecolor{cgray}{RGB}{100,100,100}
+\definecolor{cgreen}{RGB}{34,120,74}
+\tikzset{
+  ent/.style={draw=cblue, ellipse, align=center, inner sep=2pt, font=\scriptsize},
+  aser/.style={draw=cblue, rectangle, rounded corners=1pt, align=center, inner sep=3pt, fill=cblue!12, font=\scriptsize},
+  chk/.style={draw=cgray, rectangle, align=center, inner sep=3pt, font=\scriptsize},
+  fl/.style={-{Stealth[length=2mm]}, semithick, cblue},
+  et/.style={font=\tiny, text=cgray, align=center},
+}
+\newtheorem{proposition}{Proposition}
 
 \newcommand{\sys}{\textsc{CatRAG-Reif}}
 \newcommand{\hippo}{HippoRAG~2}
@@ -55,8 +68,11 @@ the decimal), the system attains $97.7$ full-chain retrieval at $k{=}5$ on
 2WikiMultihopQA versus $65.8$ (\hippo{}) and $67.6$ (CatRAG), and $93.0$
 versus $80.4$ on HotpotQA with the configuration frozen and zero per-dataset
 tuning. Attribution is explicit: a no-graph control with an identical LLM
-budget loses $12.7$/$6.3$ points, and a null model of independent link
-failures shows that our degradation with chain depth is mere accumulation
+budget loses $12.7$/$6.3$ points; a closed-form analysis of the layered
+search graph proves the walk itself cannot chain hops --- seeding does ---
+locating the capability in the plan-driven seeds; the entity memory is
+audited against external Wikidata gold (over-merges $74\to32$); and a null
+model of independent link failures shows that our degradation with chain depth is mere accumulation
 ($\mathrm{FC}\!\approx\!p^{|G_q|}$) whereas the baseline collapses $4.8\times$
 below its own extrapolation. The complete study cost approximately
 \$40; each query costs ${\sim}\$0.001$ and every LLM call is cached, making
@@ -117,7 +133,9 @@ occur, and quantifies each design decision. Our contributions are:
   qualifiers, and provenance (\S\ref{sec:assertion}); entity identity is
   resolved \emph{before} graph construction by a canonical entity memory
   derived solely from the corpus (\S\ref{sec:memory}), removing synonymy
-  edges entirely.
+  edges entirely; the memory's merge decisions are \emph{audited against
+  external Wikidata gold} and curated with registered, provenance-tracked
+  decisions (over-merges $74\to32$).
 \item \textbf{A bounded evidence planner.} Three LLM roles under strict JSON
   contracts --- an \emph{analyst} that plans the chain as typed slots and
   selects supporting facts, a conditional \emph{repairer} that fills residual
@@ -140,6 +158,11 @@ occur, and quantifies each design decision. Our contributions are:
   null model ($\mathrm{FC}\approx p^{|G_q|}$) that separates degradation by
   \emph{accumulation} (ours) from structural \emph{collapse} (the baseline)
   (\S\ref{sec:results}, \S\ref{sec:discussion}).
+\item \textbf{A structural analysis of the walk.} The canonical search
+  graph is a strict three-layer DAG whose personalized PageRank admits a
+  closed form (Proposition~\ref{prop:closedform}): the walk cannot chain
+  hops --- the seeding does. This reframes where multi-hop capability must
+  reside and is verified numerically.
 \end{enumerate}
 
 % =========================================================================
@@ -201,7 +224,8 @@ $\tau_a$ verbalizing the fact with full names and no pronouns. The node is
 linked by typed edges to its source passage (provenance), to its subject and
 object, and to \emph{every} additional participant whose surface form occurs
 in $\tau_a$ ($n$-ary reification). Three properties justify the
-representation against the triple-as-edge alternative:
+representation against the triple-as-edge alternative
+(Figure~\ref{fig:representation}):
 
 \begin{enumerate}[leftmargin=1.6em,itemsep=2pt]
 \item \textbf{Query modulability.} In a triple graph the transition
@@ -226,6 +250,38 @@ representation against the triple-as-edge alternative:
   sentence).
 \end{enumerate}
 
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[node distance=4mm and 8mm]
+  \node[ent] (t1) {Atomised};
+  \node[ent, right=12mm of t1] (t2) {Oskar Roehler};
+  \draw[fl] (t1) -- node[et, above]{\emph{directed}} (t2);
+  \node[ent, below=5mm of t1, densely dotted] (t3) {Atomised (film)};
+  \draw[cgray, densely dotted] (t1) -- node[et, left]{synonymy?} (t3);
+  \node[et, below=1mm of t3, xshift=8mm, text width=44mm, align=center]
+    {\textbf{(a) triple-as-edge} (\hippo{}): the fact is a binary,\\
+     anonymous edge without provenance; identity by thresholded synonymy};
+  \node[aser, right=30mm of t2, text width=36mm] (a) {\textbf{assertion node} $a$\\[-1pt]
+    $\tau_a$: ``Atomised was directed\\ by Oskar Roehler.''\\[1pt]
+    {\tiny qualifiers: date, place; $e(\tau_a)$}};
+  \node[ent, above left=4mm and -2mm of a] (e1) {can:atomised};
+  \node[ent, above right=4mm and -2mm of a] (e2) {can:oskar roehler};
+  \node[chk, below=5mm of a] (c1) {passage ``Atomised (film)''};
+  \draw[fl] (a) -- node[et, left]{\textsc{subject}} (e1);
+  \draw[fl] (a) -- node[et, right]{\textsc{object}} (e2);
+  \draw[fl] (a) -- node[et, right]{\textsc{provenance}} (c1);
+  \node[et, below=1mm of c1, text width=52mm, align=center]
+    {\textbf{(b) reified assertion} (ours): the fact is a \emph{node} with its
+     own sentence, $n$-ary roles and embedding, attached to canonical entities};
+\end{tikzpicture}
+\caption{The same fact under the two representations. In (a) the walk
+crosses an undifferentiated edge; in (b) it crosses \emph{through} an
+addressable fact whose transit is modulated per query
+(Eq.~\ref{eq:modulation}) and whose sentence carries the qualifiers the
+question compares.}
+\label{fig:representation}
+\end{figure}
+
 \subsection{Canonical entity memory}
 \label{sec:memory}
 
@@ -247,15 +303,49 @@ context merge automatically; the ambiguous band is adjudicated by an LLM
 shown both cards and source articles, batched and cached, under a
 deliberately strict instruction (relatives, successors, namesakes and remakes
 are \emph{not} the same entity; short and full forms of one name are).
-Verdicts are closed transitively. (4)~\emph{Canonical entries}: each group
+Verdicts are closed transitively. Writing $\nu,\phi$ for the name and
+context channels and $H(m,m')$ for the hard constraints (compatible
+birth/death years, equal regnal ordinals, compatible parenthetical
+disambiguators), the per-pair decision is
+\begin{equation}
+d(m,m')=
+\begin{cases}
+\textsc{veto} & \neg H(m,m'),\\
+\textsc{merge} & \operatorname{fold}(\nu_m)=\operatorname{fold}(\nu_{m'}),\\
+\textsc{merge} & \langle\nu_m,\nu_{m'}\rangle\ge0.90 \wedge \langle\phi_m,\phi_{m'}\rangle\ge0.70,\\
+\textsc{judge} & \langle\nu_m,\nu_{m'}\rangle\ge0.80 \;\vee\;
+                \bigl(\langle\phi_m,\phi_{m'}\rangle\ge0.75 \wedge \text{shared token}\bigr),\\
+\textsc{drop} & \text{otherwise.}
+\end{cases}
+\label{eq:adjudication}
+\end{equation}
+(4)~\emph{Canonical entries}: each group
 yields an entry with canonical name (title form preferred), alias set,
 merged description, source passages and, where it exists, the entity's
 \emph{own passage} $\pi(\varepsilon)$ --- the article about it. On the
-2WikiMultihopQA corpus, $40{,}276$ mentions consolidate into $26{,}960$
+2WikiMultihopQA corpus, $40{,}276$ mentions consolidate into $27{,}966$
 entries; on our development probe the procedure resolved $178$ of $188$
 diagnosed identity islands. The canonical graph
 $G=(\mathcal C\cup\mathcal E\cup\mathcal A,\,E)$ ---passages, entities,
 assertions--- therefore \emph{contains no synonymy edges at all}.
+
+\paragraph{Audited curation.} Because 2WikiMultihopQA carries Wikidata QIDs
+for the entities of its evidence chains, the memory can be audited against
+\emph{external} gold (never used for construction): an entry containing two
+QIDs with distinct surface forms is an over-merge; a QID split across
+entries an under-merge. Recording the \emph{provenance} of every union
+attributes each over-merge to the rule that bridged it. The audit of the
+initial memory found $74$ over-merged entries out of $2{,}211$ touched by
+the gold ($3.3\%$; $6$ under-merges), with the dominant bridge being the
+title$\to$subject union applied when the title was already a genuine
+mention. Four registered decisions --- routing those unions and
+near-identical names with differing parenthetical disambiguators to the
+judge, and letting title cards inherit the article subject's dates ---
+reduce over-merges to $\mathbf{32}$ with under-merges unchanged, at a cost
+of ${\sim}2{,}300$ cached adjudications (cents). Two development questions
+whose success depended on \emph{fortunate wrong merges} (a dataset-mislabeled
+homonym; an emperor merged with his son) are knowingly given up: precision
+of identity is the principle the rest of the system builds on.
 
 \subsection{Query pipeline and the bounded evidence planner}
 \label{sec:planner}
@@ -282,7 +372,25 @@ must never resolve the ambiguity. Selection defines
 $\tilde\sigma_a=1$ for $a\in S(q)$ and $\tilde\sigma_a=\sigma_a$ otherwise.
 
 \paragraph{Seeding.} The personalization vector $\mathbf v\in\R^{|V|}$
-combines four sources: (i)~a \emph{hard gate} --- only entities participating
+combines four sources,
+\begin{equation}
+\mathbf v(u)=
+\underbrace{\mathbb 1[u\in\mathcal E_{S}]\cdot\overline{\tilde\sigma}(u)}_{\text{(i) hard gate}}
++\underbrace{\mathbb 1[u\in\mathcal C]\cdot w_{\text{pas}}\,\hat s(u)}_{\text{(ii) dense floor}}
++\underbrace{\epsilon\cdot\mathbb 1[u\in\Top_2\langle e(q),\phi\rangle]}_{\text{(iii) weak anchors}}
++\underbrace{\mathbb 1[u=\pi(\varepsilon)]\cdot w_{\text{link}}\,\mathbf v(\varepsilon)}_{\text{(iv) own passage}},
+\label{eq:seeding}
+\end{equation}
+where $\mathcal E_S$ are the entities participating in approved facts,
+$\overline{\tilde\sigma}(u)$ their mean clipped affinity ($=1$ under the hard
+gate), $\hat s$ the min--max-normalized passage--query similarity, and
+linked entities additionally receive the floor
+$\mathbf v(\varepsilon)\leftarrow\max(\mathbf v(\varepsilon),w_{\text{link}})$.
+In observed traces the dense floor carries $94$--$98\%$ of the raw mass but
+diluted over the whole corpus (${\sim}1.6\times10^{-4}$ per passage after
+normalization), while a gated entity at weight $1$ concentrates
+${\sim}10^{-2}$ --- $25$--$60\times$ an average passage; concentration, not
+volume, decides the ranking. In detail: (i)~a \emph{hard gate} --- only entities participating
 in approved facts are seeded, at the mean clipped affinity of their approving
 facts (weight $1$ under $\tilde\sigma$); if nothing is approved the system
 degrades gracefully to dense retrieval; (ii)~a dense floor over \emph{all}
@@ -324,6 +432,66 @@ iterations). The damping factor, the passage weight and the all-passage
 seeding follow the published \hippo{} values as a pre-registered parity
 decision.
 
+\begin{proposition}[The walk does not chain; the seeding does]
+\label{prop:closedform}
+The directed search graph is a strict three-layer DAG:
+entities have in-degree $0$, every assertion has out-degree $1$ (its source
+passage), and passages are sinks (verified on the materialized graph:
+$80{,}430$ entity$\to$assertion, $47{,}999$ assertion$\to$passage and
+$36{,}811$ entity$\to$passage edges). Consequently the fixed point of
+Eq.~\eqref{eq:ppr} admits the closed form
+\begin{equation}
+\mathbf p^{*}(c)\;=\;\beta\Bigl[\;\mathbf v(c)
+\;+\;\lambda\!\!\sum_{\varepsilon\,:\,c\in N(\varepsilon)}\!\frac{\mathbf v(\varepsilon)}{Z_\varepsilon}
+\;+\;\lambda^{2}\!\!\sum_{\varepsilon}\sum_{\substack{a\ni\varepsilon\\ c(a)=c}}
+\frac{\mathbf v(\varepsilon)\,\mu_a}{Z_\varepsilon}\;\Bigr],
+\label{eq:closedform}
+\end{equation}
+with $Z_\varepsilon$ the modulated out-mass of $\varepsilon$ and $\beta$ a
+global constant absorbing the dangling-mass recycling. A passage scores by
+exactly three channels --- its own seed, the mentions of seeded entities,
+and the modulated facts of seeded entities --- all at distance $\le 2$ from
+the seeds.
+\end{proposition}
+
+\noindent\emph{Proof sketch.} With sinks recycled to $\mathbf v$, expand
+$\mathbf p^{*}=(1-\lambda')\sum_{t\ge0}\lambda'^{\,t}(P^{\!\top})^{t}\mathbf v$;
+acyclicity with depth $2$ truncates the series at $t{=}2$, and the recycled
+mass rescales all terms uniformly into $\beta$. We verified
+Eq.~\eqref{eq:closedform} numerically against the iterate to the fourth
+decimal. The consequence is architectural rather than algorithmic: multi-hop
+behaviour cannot come from the walk, which only diffuses one fact away from
+the seeds; it must come from \emph{which entities and own passages receive
+seed mass} --- precisely what the analyst's approvals, the own-passage term
+and the repair hop control. The iterative solver is kept only for graph
+variants with cycles (thresholded synonymy; the clinical
+\textsc{is\_a}/\textsc{anchored\_to} layers). \hfill$\square$
+
+\begin{figure}[t]
+\centering
+\begin{tikzpicture}[x=1mm, y=1mm, font=\tiny]
+  \node[ent, fill=cgreen!12] (e1) at (10,26) {$\varepsilon_1$\\ $\mathbf v{=}1$ (gate)};
+  \node[ent, fill=cgreen!12] (e2) at (52,26) {$\varepsilon_2$\\ $\mathbf v{=}0.5$ (link)};
+  \node[aser, text width=24mm] (a1) at (31,15) {$a$: $\mu_a{=}1$ (approved)};
+  \node[aser, text width=17mm, opacity=0.6] (a2) at (62,15) {$a'$: $\mu{=}0.25$};
+  \node[chk, text width=20mm] (c1) at (10,3) {$\pi(\varepsilon_1)$\\ $+w_{\text{link}}\mathbf v(\varepsilon_1)$};
+  \node[chk, text width=20mm] (c2) at (40,3) {$c(a)$: gold bridge};
+  \node[chk, densely dotted, text width=15mm] (c3) at (66,3) {any $c$:\\ dense floor};
+  \draw[fl] (e1) -- (a1); \draw[fl] (e2) -- (a1); \draw[fl, opacity=0.5] (e2) -- (a2);
+  \draw[fl] (a1) -- node[et, right]{provenance} (c2);
+  \draw[fl, opacity=0.5] (a2) -- (c3);
+  \draw[fl, cgreen, very thick] (e1) to[out=-90,in=90] node[et, left]{mention} (c1);
+  \node[et, text width=72mm] at (36,-6)
+   {the three channels of Eq.~\eqref{eq:closedform}: own seed (dense floor,
+    own-passage term), mentions of seeded entities, and modulated facts of
+    seeded entities --- everything at distance $\le 2$};
+\end{tikzpicture}
+\caption{The layered search graph. Entities (top) only emit mass; assertions
+drain into their unique source passage; passages are sinks whose mass
+recycles to the seeds. The walk is a diffusion of the seeding decisions.}
+\label{fig:layers}
+\end{figure}
+
 \paragraph{Targeted repair (conditional; ${\sim}20\%$ of queries).} For each
 unfilled slot, candidate facts are gathered \emph{structurally} --- the
 assertions of the own passage of the entity the slot refers to --- and by
@@ -340,6 +508,27 @@ the \emph{set}, not of individual passages. A final LLM call receives the
 plan and the top-$12$ passages of $\mathbf p^{*}$ and selects the five that
 jointly cover all slots, with a conservative guard (the walk's top-$2$ is
 preserved); remaining positions follow the walk order.
+
+\begin{figure}[t]
+\centering
+\fbox{\begin{minipage}{0.94\textwidth}\small
+\textbf{Algorithm 1} \; Query pipeline (per question $q$; $\le 3$ LLM calls, all cached)
+\begin{enumerate}[leftmargin=1.8em,itemsep=0pt,topsep=2pt]
+\item $v_0\!\leftarrow\!e(q)$;\; $\sigma_a\!\leftarrow\!\langle v_0,e(\tau_a)\rangle$ for all $a\in\mathcal A$ \hfill{\scriptsize one matrix product}
+\item $L(q)\leftarrow$ \textsc{Link}(mentions of $q$) \hfill{\scriptsize exact folded alias; name-to-name fallback}
+\item $(S,\,\text{slots},\,L,\,\text{plan})\leftarrow$ \textsc{Analyst}$\bigl(q,\;\Top_{40}\sigma\cup\text{frontier}(L)\bigr)$;\;\; $\tilde\sigma_{S}\leftarrow1$ \hfill{\scriptsize LLM call 1}
+\item $\mathbf v\leftarrow$ \textsc{Seed}$(S,L,\tilde\sigma)$ \hfill{\scriptsize Eq.~\eqref{eq:seeding}}
+\item $\mathbf p^{*}\leftarrow$ \textsc{ModulatedPPR}$(\mathbf v,\tilde\sigma)$ \hfill{\scriptsize Eqs.~\eqref{eq:modulation}--\eqref{eq:ppr}; closed form Eq.~\eqref{eq:closedform}}
+\item \textbf{while} unfilled slots with known anchor \textbf{and} rounds $<3$:\; $S\mathrel{+}=$ \textsc{Repair}(slots) \hfill{\scriptsize LLM call 2}\\
+  \phantom{6.}\;\; re-seed, re-walk; if placeholder slots remain, re-plan with discovered facts
+\item \textbf{return} \textsc{Pack}$\bigl(\text{plan},\,\Top_{12}\mathbf p^{*}|_{\mathcal C}\bigr)$ \hfill{\scriptsize LLM call 3; walk's top-2 preserved}
+\end{enumerate}
+\end{minipage}}
+\caption{The bounded evidence planner. The LLM decides within JSON contracts
+at steps 3, 6 and 7; every other step is deterministic linear algebra or an
+index lookup.}
+\label{fig:algorithm}
+\end{figure}
 
 \paragraph{Bounded agency.} The three roles operate under validated JSON
 contracts, a budget of at most three calls per query, response caching keyed
@@ -474,10 +663,46 @@ retrieval --- loses $12.7$ points of $\mathrm{FC@}5$ on 2WikiMultihopQA
 on both): the representation contributes beyond the planner. The planner
 mainly repairs double chains; single bridges are repaired by the graph
 ($130/141$ of the control's missed golds do not even appear in its top-20).
+The attribution transfers: on the HotpotQA probe the repair hop contributes
+$+2.0$ $[+0.5,+4.0]$ and the packer $+4.0$ points of $\mathrm{R@}2$
+$[+1.5,+6.8]$ (early ordering), and a post-hoc \emph{strengthened} control
+--- re-planning even without new passages, anchors shown at full length ---
+still loses $9.6$/$5.1$ points on the two benchmarks. Notably, the no-graph
+control by itself already exceeds the published graph baselines on HotpotQA
+($83.9$ vs.\ $80.4$/$75.5$), which decomposes our margin over CatRAG into a
+planner share and a representation share ($+3.5$/$+6.3$ on HotpotQA;
+$+15.7$/$+12.7$ on 2WikiMultihopQA).
 Finally, the planner model is interchangeable
 (Table~\ref{tab:hotpot}, right): an open 20B model nearly ties
 \texttt{gpt-4o} at $1/24$ of the cost --- the gain resides in the task
 design, not in model scale.
+
+\paragraph{System evolution: design by diagnosis.} The system was not
+designed in one pass; each mechanism answers a measured failure of its
+predecessor, with decisions taken on held-out probes and one benchmark
+measurement per configuration (Table~\ref{tab:evolution}). The trajectory
+--- $+46$ points of $\mathrm{FC@}5$ in four iterations --- is itself
+evidence that chain-level failure has identifiable, individually removable
+causes.
+
+\begin{table}[t]
+\centering\small\setlength{\tabcolsep}{4pt}
+\caption{Design by diagnosis on 2WikiMultihopQA (benchmark $\mathrm{FC@}5$;
+one measurement per configuration). Each remedy was motivated by an error
+analysis of the previous iteration on held-out data.}
+\label{tab:evolution}
+\begin{tabular}{lp{0.34\textwidth}p{0.30\textwidth}c}
+\toprule
+iter. & diagnosis (measured) & remedy introduced & FC@5\\
+\midrule
+v1 & --- (direct port: query-to-fact seeding, dense floor, parity dials) & --- & $51.2$\\
+v2 & filter resolved roles from parametric knowledge; soft gate seeded noise; $n$-ary participants unreachable & few-shot recognition filter, hard gate, $n$-ary reification & $78.2$\\
+v3 & $57\%$ of failures were identity islands (``H.\,P.'' vs ``Howard Phillips'') & canonical entity memory $+$ linker $+$ own-passage seeding & $90.6$\\
+$+$planner & filter \emph{saw} the bridge fact but did not select it ($12/15$ held-out failures); no per-chain budget & analyst plan, repair hop, set packing & $96.9$\\
+v4 & over-merges audited with QIDs ($74$ entries); linker blind to name variants & audited curation; name-to-name linker; single strategy & $96.0$ / $\mathbf{97.7}$\\
+\bottomrule
+\end{tabular}
+\end{table}
 
 % =========================================================================
 \section{Discussion}

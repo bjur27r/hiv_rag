@@ -865,6 +865,13 @@ independiente: orden híbrido «aprobados primero» para R@2 (evidencia del
 control: +5,0 R@2 SIG). Anotado 05-09: consigna del analista v2 (definir
 «hueco», la flecha `->` y `[X]` con especificación explícita, no solo por
 demostración; inconsistencia detectada por el usuario; re-validar en sondeo
-si se cambia — la actual se apoya en la capacidad del modelo: qwen se rompió). Producto: porte GeSIDA empezando por el paso 0
+si se cambia — la actual se apoya en la capacidad del modelo: qwen se rompió).
+También 05-09: (i) tope de 20 nuevos de la frontera en `_analista` corta por
+orden de concatenación entidad-a-entidad, no por turnos (round-robin justo,
+una línea; casi nunca muerde: ~1,4 nuevos/pregunta); (ii) gazapo latente en
+`_semillas`: el `return pers` está dentro de `if self.canonico` (modo no
+canónico devolvería None; inofensivo hoy, corregir indentación en la próxima
+tanda). El cuaderno comparativo suma la sección 1.6 «Anatomía de r4» y la
+celda que materializa K(q) (91 celdas, sin commitear). Producto: porte GeSIDA empezando por el paso 0
 (reranker inactivo en producción, eval≠producción, lente numérica, anti-hub).
 Comandos exactos en BITACORA_2026-08-30.md («Cómo retomar»).
